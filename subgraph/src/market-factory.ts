@@ -4,7 +4,10 @@ import {
   Bytes,
   dataSource,
   ethereum,
+  log,
 } from "@graphprotocol/graph-ts";
+import { fetchTokenSymbol, fetchTokenName, fetchTokenTotalSupply, fetchTokenDecimals } from './algebra/utils/token'
+import { ZERO_BI, ZERO_BD } from './algebra/utils/constants'
 import {
   MarketFactory,
   NewMarket as NewMarketEvent,
@@ -16,6 +19,7 @@ import {
   MarketQuestion,
   MarketsCount,
   Question,
+  Token,
 } from "../generated/schema";
 import { DEFAULT_FINALIZE_TS } from "./reality";
 
@@ -84,6 +88,66 @@ export function handleNewMarket(event: NewMarketEvent): void {
     event.address,
     Address.fromString(event.params.market.toHexString())
   );
+
+  let token0 = Token.load(data.wrappedTokens[0].toHexString())
+  let token1 = Token.load(data.wrappedTokens[1].toHexString())
+
+
+  // fetch info if null
+  if (token0 === null) {
+    token0 = new Token(data.wrappedTokens[0].toHexString())
+    token0.symbol = fetchTokenSymbol(data.wrappedTokens[0])
+    token0.name = fetchTokenName(data.wrappedTokens[0])
+    token0.totalSupply = fetchTokenTotalSupply(data.wrappedTokens[0])
+    let decimals = fetchTokenDecimals(data.wrappedTokens[0])
+
+    // bail if we couldn't figure out the decimals
+    if (decimals === null) {
+      log.debug('mybug the decimal on token 0 was null', [])
+      return
+    }
+
+    token0.decimals = decimals
+    token0.derivedMatic = ZERO_BD
+    token0.volume = ZERO_BD
+    token0.volumeUSD = ZERO_BD
+    token0.feesUSD = ZERO_BD
+    token0.untrackedVolumeUSD = ZERO_BD
+    token0.totalValueLocked = ZERO_BD
+    token0.totalValueLockedUSD = ZERO_BD
+    token0.totalValueLockedUSDUntracked = ZERO_BD
+    token0.txCount = ZERO_BI
+    token0.poolCount = ZERO_BI
+    token0.whitelistPools = []
+    token0.isSeer = true
+  }
+
+  if (token1 === null) {
+    token1 = new Token(data.wrappedTokens[1].toHexString())
+    token1.symbol = fetchTokenSymbol(data.wrappedTokens[1])
+    token1.name = fetchTokenName(data.wrappedTokens[1])
+    token1.totalSupply = fetchTokenTotalSupply(data.wrappedTokens[1])
+    let decimals = fetchTokenDecimals(data.wrappedTokens[1])
+    // bail if we couldn't figure out the decimals
+    if (decimals === null) {
+      log.debug('mybug the decimal on token 0 was null', [])
+      return
+    }
+    token1.decimals = decimals
+    token1.derivedMatic = ZERO_BD
+    token1.volume = ZERO_BD
+    token1.volumeUSD = ZERO_BD
+    token1.untrackedVolumeUSD = ZERO_BD
+    token1.feesUSD = ZERO_BD
+    token1.totalValueLocked = ZERO_BD
+    token1.totalValueLockedUSD = ZERO_BD
+    token1.totalValueLockedUSDUntracked = ZERO_BD
+    token1.txCount = ZERO_BI
+    token1.poolCount = ZERO_BI
+    token1.whitelistPools = []
+    token1.isSeer = true
+  }
+
 
   processMarket(
     event,
