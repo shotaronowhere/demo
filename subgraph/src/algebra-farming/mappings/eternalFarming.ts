@@ -2,12 +2,12 @@ import { ethereum, crypto, BigInt } from '@graphprotocol/graph-ts';
 import {
   EternalFarmingCreated,
   FarmEntered,
-  RewardAmountsDecreased,
   FarmEnded,
   RewardClaimed,
   IncentiveDeactivated,
   RewardsRatesChanged,
   RewardsAdded,
+  RewardAmountsDecreased,
   RewardsCollected
 } from '../../../generated/EternalFarming/EternalFarming';
 import { Deposit, Reward, EternalFarming } from '../../../generated/schema';
@@ -18,11 +18,13 @@ export function handleIncentiveCreated(event: EternalFarmingCreated): void {
     ethereum.Value.fromAddress(event.params.rewardToken),
     ethereum.Value.fromAddress(event.params.bonusRewardToken),
     ethereum.Value.fromAddress(event.params.pool),
-    ethereum.Value.fromUnsignedBigInt(event.params.nonce)
+    ethereum.Value.fromUnsignedBigInt(event.params.startTime),
+    ethereum.Value.fromUnsignedBigInt(event.params.endTime)
   ];
 
   createTokenEntity(event.params.rewardToken)
   createTokenEntity(event.params.bonusRewardToken)
+  createTokenEntity(event.params.multiplierToken)
 
   let _incentiveTuple = changetype<ethereum.Tuple>(incentiveIdTuple);
 
@@ -40,14 +42,22 @@ export function handleIncentiveCreated(event: EternalFarmingCreated): void {
     entity.bonusRewardRate = BigInt.fromString("0");
   }
 
+
   entity.rewardToken = event.params.rewardToken;
   entity.bonusRewardToken = event.params.bonusRewardToken;
   entity.pool = event.params.pool;
-  entity.nonce = event.params.nonce;
   entity.virtualPool = event.params.virtualPool;
-
-  entity.isDeactivated = false;
+  entity.startTime = event.params.startTime;
+  entity.endTime = event.params.endTime;
+  entity.isDetached = false;
   entity.minRangeLength = BigInt.fromI32(event.params.minimalAllowedPositionWidth)
+  entity.tokenAmountForTier1 = event.params.tiers.tokenAmountForTier1;
+  entity.tokenAmountForTier2 = event.params.tiers.tokenAmountForTier2;
+  entity.tokenAmountForTier3 = event.params.tiers.tokenAmountForTier3;
+  entity.tier1Multiplier = event.params.tiers.tier1Multiplier;
+  entity.tier2Multiplier = event.params.tiers.tier2Multiplier;
+  entity.tier3Multiplier = event.params.tiers.tier3Multiplier;
+  entity.multiplierToken = event.params.multiplierToken;
   entity.save();
 }
 
@@ -56,6 +66,9 @@ export function handleTokenStaked(event: FarmEntered): void {
   let entity = Deposit.load(event.params.tokenId.toString());
   if (entity != null) {
     entity.eternalFarming = event.params.incentiveId;
+    entity.enteredInEternalFarming = event.block.timestamp;
+    entity.tokensLockedEternal = event.params.tokensLocked;
+    entity.tierEternal = getTier(event.params.tokensLocked, event.params.incentiveId.toHexString())
     entity.save();
   }
 
@@ -88,6 +101,8 @@ export function handleTokenUnstaked(event: FarmEnded): void {
 
   if (entity != null) {
     entity.eternalFarming = null;
+    entity.tierEternal = BigInt.fromString("0")
+    entity.tokensLockedEternal = BigInt.fromString("0")
     entity.save();
   }
 
@@ -122,15 +137,38 @@ export function handleTokenUnstaked(event: FarmEnded): void {
 
 export function handleDeactivate(event: IncentiveDeactivated): void {
 
-  let entity = EternalFarming.load(event.params.incentiveId.toHex());
+  let incentiveIdTuple: Array<ethereum.Value> = [
+    ethereum.Value.fromAddress(event.params.rewardToken),
+    ethereum.Value.fromAddress(event.params.bonusRewardToken),
+    ethereum.Value.fromAddress(event.params.pool),
+    ethereum.Value.fromUnsignedBigInt(event.params.startTime),
+    ethereum.Value.fromUnsignedBigInt(event.params.endTime)
+  ];
+
+  let _incentiveTuple = changetype<ethereum.Tuple>(incentiveIdTuple);
+
+  let incentiveIdEncoded = ethereum.encode(
+    ethereum.Value.fromTuple(_incentiveTuple)
+  )!;
+  let incentiveId = crypto.keccak256(incentiveIdEncoded);
+
+  let entity = EternalFarming.load(incentiveId.toHex());
 
   if (entity) {
-    entity.isDeactivated = true
+    entity.isDetached = true
     entity.save()
   }
 
 }
 
+export function handleRewardAmountsDecreased(event: RewardAmountsDecreased): void {
+  let incentive = EternalFarming.load(event.params.incentiveId.toHexString())
+  if (incentive) {
+    incentive.bonusReward -= event.params.bonusReward
+    incentive.reward -= event.params.reward
+    incentive.save()
+  }
+}
 
 export function handleRewardsRatesChanged(event: RewardsRatesChanged): void {
   let eternalFarming = EternalFarming.load(event.params.incentiveId.toHexString())
@@ -146,15 +184,6 @@ export function handleRewardsAdded(event: RewardsAdded): void {
   if (eternalFarming) {
     eternalFarming.reward += event.params.rewardAmount
     eternalFarming.bonusReward += event.params.bonusRewardAmount
-    eternalFarming.save()
-  }
-}
-
-export function handleRewardDecreased(event: RewardAmountsDecreased): void {
-  let eternalFarming = EternalFarming.load(event.params.incentiveId.toHexString())
-  if (eternalFarming) {
-    eternalFarming.reward -= event.params.rewardAmount
-    eternalFarming.bonusReward -= event.params.bonusRewardAmount
     eternalFarming.save()
   }
 }
@@ -203,3 +232,20 @@ export function handleCollect(event: RewardsCollected): void {
   }
 }
 
+function getTier(amount: BigInt, incentiveId: string): BigInt {
+  let incentive = EternalFarming.load(incentiveId)
+  let res = BigInt.fromString("0")
+  const MIN_MULTIPLIER = BigInt.fromString("10000")
+  if (incentive) {
+    if (incentive.tier1Multiplier == MIN_MULTIPLIER && incentive.tier2Multiplier == MIN_MULTIPLIER && incentive.tier3Multiplier == MIN_MULTIPLIER) {
+      return res
+    }
+    if (incentive.tokenAmountForTier3 <= amount)
+      res = BigInt.fromString("3")
+    else if (incentive.tokenAmountForTier2 <= amount)
+      res = BigInt.fromString("2")
+    else if (incentive.tokenAmountForTier1 <= amount)
+      res = BigInt.fromString("1")
+  }
+  return res
+} 

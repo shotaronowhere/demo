@@ -6,10 +6,11 @@ import {
   NonfungiblePositionManager,
   Transfer
 } from '../../../generated/NonfungiblePositionManager/NonfungiblePositionManager'
-import { Position, PositionSnapshot, Token, Deposit } from '../../../generated/schema'
+import { Position, Deposit, PositionSnapshot, Token } from '../../../generated/schema'
 import { ADDRESS_ZERO, factoryContract, ZERO_BD, ZERO_BI, pools_list } from '../utils/constants'
 import { Address, BigInt, ethereum } from '@graphprotocol/graph-ts'
 import { convertTokenToDecimal, loadTransaction } from '../utils'
+import { FarmingCenterAddress } from '../../algebra-farming/utils/constants'
 
 
 
@@ -40,8 +41,8 @@ function getPosition(event: ethereum.Event, tokenId: BigInt): Position | null {
         position.token0 = positionResult.value2.toHexString()
         position.token1 = positionResult.value3.toHexString()
       }
-      position.tickLower = position.pool.concat('#').concat(positionResult.value5.toString())
-      position.tickUpper = position.pool.concat('#').concat(positionResult.value6.toString())
+      position.tickLower = position.pool.concat('#').concat(positionResult.value4.toString())
+      position.tickUpper = position.pool.concat('#').concat(positionResult.value5.toString())
       position.liquidity = ZERO_BI
       position.depositedToken0 = ZERO_BD
       position.depositedToken1 = ZERO_BD
@@ -52,8 +53,8 @@ function getPosition(event: ethereum.Event, tokenId: BigInt): Position | null {
       position.collectedFeesToken0 = ZERO_BD
       position.collectedFeesToken1 = ZERO_BD
       position.transaction = loadTransaction(event).id
-      position.feeGrowthInside0LastX128 = positionResult.value8
-      position.feeGrowthInside1LastX128 = positionResult.value9
+      position.feeGrowthInside0LastX128 = positionResult.value7
+      position.feeGrowthInside1LastX128 = positionResult.value8
     }
   }
 
@@ -68,8 +69,8 @@ function updateFeeVars(position: Position, event: ethereum.Event, tokenId: BigIn
   let positionManagerContract = NonfungiblePositionManager.bind(event.address)
   let positionResult = positionManagerContract.try_positions(tokenId)
   if (!positionResult.reverted) {
-    position.feeGrowthInside0LastX128 = positionResult.value.value8
-    position.feeGrowthInside1LastX128 = positionResult.value.value9
+    position.feeGrowthInside0LastX128 = positionResult.value.value7
+    position.feeGrowthInside1LastX128 = positionResult.value.value8
   }
   return position
 }
@@ -111,18 +112,6 @@ function savePositionSnapshot(position: Position, event: ethereum.Event): void {
 }
 
 export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
-  let entity = Deposit.load(event.params.tokenId.toString());
-
-  if (entity == null) {
-    entity = new Deposit(event.params.tokenId.toString());
-    entity.owner = event.transaction.from;
-    entity.pool = event.params.pool;
-    entity.liquidity = BigInt.fromString("0")
-    entity.rangeLength = getRangeLength(event.params.tokenId, event.address)
-  }
-  entity.liquidity = entity.liquidity.plus(event.params.actualLiquidity);
-  entity.save();
-
 
   let position = getPosition(event, event.params.tokenId)
 
@@ -149,7 +138,7 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
   else
     amount1 = convertTokenToDecimal(event.params.amount1, token1!.decimals)
 
-  position.liquidity = position.liquidity.plus(event.params.actualLiquidity)
+  position.liquidity = position.liquidity.plus(event.params.liquidity)
   position.depositedToken0 = position.depositedToken0.plus(amount0)
   position.depositedToken1 = position.depositedToken1.plus(amount1)
 
@@ -161,16 +150,30 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
 
   savePositionSnapshot(position, event)
 
+  // farming
+
+
+  let entity = Deposit.load(event.params.tokenId.toString());
+
+  if (entity == null) {
+    entity = new Deposit(event.params.tokenId.toString());
+    entity.owner = event.transaction.from;
+    entity.pool = event.params.pool;
+    entity.onFarmingCenter = false;
+    entity.liquidity = BigInt.fromString("0")
+    entity.rangeLength = getRangeLength(event.params.tokenId, event.address)
+    entity.L2tokenId = event.params.tokenId
+    entity.tokensLockedLimit = BigInt.fromString("0")
+    entity.tokensLockedEternal = BigInt.fromString("0")
+    entity.tierLimit = BigInt.fromString("0")
+    entity.tierEternal = BigInt.fromString("0")
+  }
+  entity.liquidity = entity.liquidity.plus(event.params.liquidity);
+  entity.save();
+
 }
 
 export function handleDecreaseLiquidity(event: DecreaseLiquidity): void {
-
-  let deposit = Deposit.load(event.params.tokenId.toString());
-  if (deposit) {
-    deposit.liquidity = deposit.liquidity.minus(event.params.liquidity)
-    deposit.save()
-  }
-
   let position = getPosition(event, event.params.tokenId)
 
   // position was not able to be fetched
@@ -207,6 +210,14 @@ export function handleDecreaseLiquidity(event: DecreaseLiquidity): void {
   position.save()
 
   savePositionSnapshot(position, event)
+
+  //farming
+
+  let deposit = Deposit.load(event.params.tokenId.toString());
+  if (deposit) {
+    deposit.liquidity = deposit.liquidity.minus(event.params.liquidity)
+    deposit.save()
+  }
 }
 
 
@@ -254,12 +265,6 @@ export function handleCollect(event: Collect): void {
 }
 
 export function handleTransfer(event: Transfer): void {
-  let entity = Deposit.load(event.params.tokenId.toString());
-
-  if (entity != null) {
-    entity.owner = event.params.to;
-    entity.save();
-  }
 
   let position = getPosition(event, event.params.tokenId)
 
@@ -273,6 +278,24 @@ export function handleTransfer(event: Transfer): void {
 
   savePositionSnapshot(position, event)
 
+  // farming
+
+
+  let entity = Deposit.load(event.params.tokenId.toString());
+
+  if (entity != null) {
+    entity.owner = event.params.to;
+
+    if (event.params.to == FarmingCenterAddress) {
+      entity.onFarmingCenter = true
+      entity.owner = event.params.from;
+    }
+
+    if (event.params.from == FarmingCenterAddress) {
+      entity.onFarmingCenter = false
+    }
+    entity.save();
+  }
 
 }
 
@@ -285,7 +308,7 @@ function getRangeLength(tokenId: BigInt, eventAddress: Address): BigInt {
   const stringBoolean = `${positionCall.reverted}`
   if (!positionCall.reverted) {
     let positionResult = positionCall.value
-    return BigInt.fromI32(positionResult.value6 - positionResult.value5)
+    return BigInt.fromI32(positionResult.value5 - positionResult.value4)
   }
   else {
     return BigInt.fromString('0')

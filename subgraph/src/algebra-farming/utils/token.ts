@@ -92,7 +92,6 @@ export function createTokenEntity(tokenAddress: Address): void {
     token.name = fetchTokenName(tokenAddress)
     token.decimals = fetchTokenDecimals(tokenAddress)
     token.symbol = fetchTokenSymbol(tokenAddress)
-    token.isSeer = false
     token.save()
   }
 

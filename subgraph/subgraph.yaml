@@ -9,12 +9,12 @@ dataSources:
     name: Factory
     network: gnosis
     source:
-      address: "0xA0864cCA6E114013AB0e27cbd5B6f4c8947da766"
       abi: Factory
+      address: "0xA0864cCA6E114013AB0e27cbd5B6f4c8947da766"
       startBlock: 30096645
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.6
+      apiVersion: 0.0.7
       language: wasm/assemblyscript
       file: ./src/algebra/mappings/factory.ts
       entities:
@@ -34,20 +34,16 @@ dataSources:
       eventHandlers:
         - event: Pool(indexed address,indexed address,address)
           handler: handlePoolCreated
-        - event: CustomPool(indexed address,indexed address,indexed address,address)
-          handler: handleCustomPoolCreated
-        - event: DefaultCommunityFee(uint16)
-          handler: handleNewCommunityFee
   - kind: ethereum/contract
     name: NonfungiblePositionManager
     network: gnosis
     source:
-      address: "0x91fD594c46D8B01E62dBDeBed2401dde01817834"
       abi: NonfungiblePositionManager
+      address: "0x91fD594c46D8B01E62dBDeBed2401dde01817834"
       startBlock: 30096660
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.6
+      apiVersion: 0.0.7
       language: wasm/assemblyscript
       file: ./src/algebra/mappings/position-manager.ts
       entities:
@@ -63,6 +59,10 @@ dataSources:
           file: ./abis/factory.json
         - name: ERC20
           file: ./abis/ERC20.json
+        - name: ERC20SymbolBytes
+          file: ./abis/ERC20SymbolBytes.json
+        - name: ERC20NameBytes
+          file: ./abis/ERC20NameBytes.json
       eventHandlers:
         - event: Collect(indexed uint256,address,uint256,uint256)
           handler: handleCollect
@@ -77,12 +77,12 @@ dataSources:
     name: EternalFarming
     network: gnosis
     source:
-      address: "0x607BbfD4CEbd869AaD04331F8a2AD0C3C396674b"
       abi: EternalFarming
+      address: "0x607BbfD4CEbd869AaD04331F8a2AD0C3C396674b"
       startBlock: 30096668
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.6
+      apiVersion: 0.0.7
       language: wasm/assemblyscript
       file: ./src/algebra-farming/mappings/eternalFarming.ts
       entities:
@@ -101,25 +101,97 @@ dataSources:
           file: ./abis/ERC20NameBytes.json
       eventHandlers:
         - event: EternalFarmingCreated(indexed address,indexed address,indexed
-            address,address,uint256,uint256,uint256,uint24)
+            address,address,uint256,uint256,uint256,uint256,(uint256,uint256,uint256,uint32,uint32,uint32),address,uint24)
           handler: handleIncentiveCreated
         - event: RewardClaimed(indexed address,uint256,indexed address,indexed address)
           handler: handleRewardClaimed
-        - event: FarmEntered(indexed uint256,indexed bytes32,uint128)
+        - event: FarmEntered(indexed uint256,indexed bytes32,uint128,uint256)
           handler: handleTokenStaked
         - event: FarmEnded(indexed uint256,indexed bytes32,indexed
             address,address,address,uint256,uint256)
           handler: handleTokenUnstaked
-        - event: IncentiveDeactivated(indexed bytes32)
+        - event: IncentiveDeactivated(indexed address,indexed address,indexed
+            address,address,uint256,uint256)
           handler: handleDeactivate
         - event: RewardsRatesChanged(uint128,uint128,bytes32)
           handler: handleRewardsRatesChanged
         - event: RewardsAdded(uint256,uint256,bytes32)
           handler: handleRewardsAdded
+        - event: RewardAmountsDecreased(uint256,uint256,bytes32)
+          handler: handleRewardAmountsDecreased
         - event: RewardsCollected(uint256,bytes32,uint256,uint256)
           handler: handleCollect
+  - kind: ethereum/contract
+    name: FarmingCenter
+    network: gnosis
+    source:
+      abi: FarmingCenter
+      address: "0xDe51dDF1aE7d5BBD7bF1A0e40aAA1F6C12579106"
+      startBlock: 30096672
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.6
+      language: wasm/assemblyscript
+      file: ./src/algebra-farming/mappings/center.ts
+      entities:
+        - Deposit
+        - Token
+      abis:
+        - name: FarmingCenter
+          file: ./abis/FarmingCenter.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+        - name: ERC20SymbolBytes
+          file: ./abis/ERC20SymbolBytes.json
+        - name: ERC20NameBytes
+          file: ./abis/ERC20NameBytes.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,indexed uint256)
+          handler: handleTransfer
+  - kind: ethereum/contract
+    name: LimitFarming
+    network: gnosis
+    source:
+      address: "0xA01e2785d2D04cC0a09Bde9C3eA49Bf0aD7811F2"
+      abi: LimitFarming
+      startBlock: 30096667
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.6
+      language: wasm/assemblyscript
+      file: ./src/algebra-farming/mappings/limitFarming.ts
+      entities:
+        - Deposit
+        - Token
+        - LimitFarming
+        - Reward
+      abis:
+        - name: LimitFarming
+          file: ./abis/LimitFarming.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+        - name: ERC20SymbolBytes
+          file: ./abis/ERC20SymbolBytes.json
+        - name: ERC20NameBytes
+          file: ./abis/ERC20NameBytes.json
+      eventHandlers:
+        - event: LimitFarmingCreated(indexed address,indexed address,indexed
+            address,uint256,uint256,uint256,uint256,(uint256,uint256,uint256,uint32,uint32,uint32),address,uint24,uint32)
+          handler: handleIncentiveCreated
+        - event: RewardClaimed(indexed address,uint256,indexed address,indexed address)
+          handler: handleRewardClaimed
+        - event: FarmEntered(indexed uint256,indexed bytes32,uint128,uint256)
+          handler: handleTokenStaked
+        - event: FarmEnded(indexed uint256,indexed bytes32,indexed
+            address,address,address,uint256,uint256)
+          handler: handleTokenUnstaked
+        - event: IncentiveDeactivated(indexed address,indexed address,indexed
+            address,address,uint256,uint256)
+          handler: handleDeactivate
+        - event: RewardsAdded(uint256,uint256,bytes32)
+          handler: handleRewardsAdded
         - event: RewardAmountsDecreased(uint256,uint256,bytes32)
-          handler: handleRewardDecreased
+          handler: handleRewardAmountsDecreased
   - kind: ethereum
     name: MarketFactory
     network: gnosis
@@ -139,6 +211,12 @@ dataSources:
           file: ./abis/Realitiy.json
         - name: MarketView
           file: ./abis/MarketView.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+        - name: ERC20SymbolBytes
+          file: ./abis/ERC20SymbolBytes.json
+        - name: ERC20NameBytes
+          file: ./abis/ERC20NameBytes.json
       eventHandlers:
         - event: NewMarket(indexed address,string,address,bytes32,bytes32,bytes32[])
           handler: handleNewMarket
@@ -281,25 +359,17 @@ templates:
       eventHandlers:
         - event: Initialize(uint160,int24)
           handler: handleInitialize
-        - event: Swap(indexed address,indexed
-            address,int256,int256,uint160,uint128,int24,uint24,uint24)
+        - event: Swap(indexed address,indexed address,int256,int256,uint160,uint128,int24)
           handler: handleSwap
         - event: Mint(address,indexed address,indexed int24,indexed
             int24,uint128,uint256,uint256)
           handler: handleMint
-        - event: Burn(indexed address,indexed int24,indexed
-            int24,uint128,uint256,uint256,uint24)
+        - event: Burn(indexed address,indexed int24,indexed int24,uint128,uint256,uint256)
           handler: handleBurn
         - event: Fee(uint16)
           handler: handleChangeFee
         - event: Collect(indexed address,address,indexed int24,indexed
             int24,uint128,uint128)
           handler: handleCollect
-        - event: CommunityFee(uint16)
+        - event: CommunityFee(uint8,uint8)
           handler: handleSetCommunityFee
-        - event: TickSpacing(int24)
-          handler: handleSetTickSpacing
-        - event: Plugin(address)
-          handler: handlePlugin
-        - event: PluginConfig(uint8)
-          handler: handlePluginConfig

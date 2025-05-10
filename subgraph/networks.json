@@ -12,6 +12,14 @@
       "address": "0xA0864cCA6E114013AB0e27cbd5B6f4c8947da766",
       "startBlock": 30096645
     },
+    "LimitFarming": {
+      "address": "0xA01e2785d2D04cC0a09Bde9C3eA49Bf0aD7811F2",
+      "startBlock": 30096667
+    },
+    "FarmingCenter": {
+      "address": "0xDe51dDF1aE7d5BBD7bF1A0e40aAA1F6C12579106",
+      "startBlock": 30096672
+    },
     "MarketFactory": {
       "address": "0x83183DA839Ce8228E31Ae41222EaD9EDBb5cDcf1",
       "startBlock": 36404701

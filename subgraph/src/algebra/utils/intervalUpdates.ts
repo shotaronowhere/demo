@@ -60,8 +60,6 @@ export function updatePoolDayData(event: ethereum.Event): PoolDayData {
     // things that dont get initialized always
     poolDayData.volumeToken0 = ZERO_BD
     poolDayData.volumeToken1 = ZERO_BD
-    poolDayData.feesToken0 = ZERO_BD
-    poolDayData.feesToken1 = ZERO_BD
     poolDayData.volumeUSD = ZERO_BD
     poolDayData.untrackedVolumeUSD = ZERO_BD
     poolDayData.feesUSD = ZERO_BD
@@ -72,6 +70,8 @@ export function updatePoolDayData(event: ethereum.Event): PoolDayData {
     poolDayData.high = pool.token0Price
     poolDayData.low = pool.token0Price
     poolDayData.close = pool.token0Price
+    poolDayData.feesToken0 = pool.collectedFeesToken0
+    poolDayData.feesToken1 = pool.collectedFeesToken1
   }
 
   if (pool.token0Price.gt(poolDayData.high)) {
