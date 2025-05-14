@@ -80,6 +80,7 @@ export function handlePoolCreated(event: PoolEvent): void {
     token0.txCount = ZERO_BI
     token0.poolCount = ZERO_BI
     token0.whitelistPools = []
+    token0.isSeer = false
   }
 
   if (token1 === null) {
@@ -105,6 +106,7 @@ export function handlePoolCreated(event: PoolEvent): void {
     token1.txCount = ZERO_BI
     token1.poolCount = ZERO_BI
     token1.whitelistPools = []
+    token1.isSeer = false
   }
 
   // update white listed pools

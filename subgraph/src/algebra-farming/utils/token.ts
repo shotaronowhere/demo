@@ -2,8 +2,10 @@ import { ERC20 } from '../../../generated/EternalFarming/ERC20'
 import { ERC20SymbolBytes } from '../../../generated/EternalFarming/ERC20SymbolBytes'
 import { ERC20NameBytes } from '../../../generated/EternalFarming/ERC20NameBytes'
 import { StaticTokenDefinition } from './staticTokenDefinition'
-import { BigInt, Address } from '@graphprotocol/graph-ts'
+import { BigInt, Address, log } from '@graphprotocol/graph-ts'
 import { Token } from '../../../generated/schema';
+import { fetchTokenTotalSupply } from '../../algebra/utils/token'
+import { ZERO_BD, ZERO_BI } from '../../algebra/utils/constants'
 
 function isNullEthValue(value: string): boolean {
   return value == '0x0000000000000000000000000000000000000000000000000000000000000001'
@@ -90,9 +92,30 @@ export function createTokenEntity(tokenAddress: Address): void {
   if (token == null) {
     token = new Token(tokenAddress.toHexString())
     token.name = fetchTokenName(tokenAddress)
-    token.decimals = fetchTokenDecimals(tokenAddress)
+    let decimals = fetchTokenDecimals(tokenAddress)
+    // bail if we couldn't figure out the decimals
+    if (decimals === null) {
+      log.debug('mybug the decimal on token 0 was null', [])
+      return
+    }
+    token.decimals = decimals
     token.symbol = fetchTokenSymbol(tokenAddress)
+    token.totalSupply = fetchTokenTotalSupply(tokenAddress)
+    token.derivedMatic = ZERO_BD
+    token.volume = ZERO_BD
+    token.volumeUSD = ZERO_BD
+    token.feesUSD = ZERO_BD
+    token.untrackedVolumeUSD = ZERO_BD
+    token.totalValueLocked = ZERO_BD
+    token.totalValueLockedUSD = ZERO_BD
+    token.totalValueLockedUSDUntracked = ZERO_BD
+    token.txCount = ZERO_BI
+    token.poolCount = ZERO_BI
+    token.whitelistPools = []
+    token.isSeer = false
     token.save()
   }
+
+
 
 }
