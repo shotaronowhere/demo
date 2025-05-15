@@ -29,6 +29,9 @@ import { createTick } from '../utils/tick'
 
 export function handleInitialize(event: Initialize): void {
   let pool = Pool.load(event.address.toHexString())!
+  if (pool === null) {
+    return;
+  }
 
   pool.sqrtPrice = event.params.price
   pool.tick = BigInt.fromI32(event.params.tick)
@@ -44,8 +47,8 @@ export function handleInitialize(event: Initialize): void {
   updatePoolDayData(event)
   updatePoolHourData(event)
   // update token prices
-  token0.derivedMatic = findEthPerToken(token0 as Token)
-  token1.derivedMatic = findEthPerToken(token1 as Token)
+  token0.derivedMatic = findEthPerToken(token0 as Token, event.block)
+  token1.derivedMatic = findEthPerToken(token1 as Token, event.block)
   token0.save()
   token1.save()
 
@@ -55,6 +58,9 @@ export function handleMint(event: MintEvent): void {
   let bundle = Bundle.load('1')!
   let poolAddress = event.address.toHexString()
   let pool = Pool.load(poolAddress)!
+  if (pool === null) {
+    return;
+  }
   let factory = Factory.load(FACTORY_ADDRESS)!
 
 
@@ -77,7 +83,9 @@ export function handleMint(event: MintEvent): void {
 
   // reset tvl aggregates until new amounts calculated
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(pool.totalValueLockedMatic)
-
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.minus(pool.totalValueLockedMatic)
+  }
   // update globals
   factory.txCount = factory.txCount.plus(ONE_BI)
 
@@ -113,6 +121,12 @@ export function handleMint(event: MintEvent): void {
   // reset aggregates with new amounts
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
   factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
+
+  // seer
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.plus(pool.totalValueLockedMatic)
+    factory.totalSeerValueLockedUSD = factory.totalSeerValueLockedMatic.times(bundle.maticPriceUSD)
+  }
 
   let transaction = loadTransaction(event)
   let mint = new Mint(transaction.id.toString() + '#' + pool.txCount.toString())
@@ -197,6 +211,9 @@ export function handleBurn(event: BurnEvent): void {
   let bundle = Bundle.load('1')!
   let poolAddress = event.address.toHexString()
   let pool = Pool.load(poolAddress)!
+  if (pool === null) {
+    return;
+  }
   let factory = Factory.load(FACTORY_ADDRESS)!
 
   let token0 = Token.load(pool.token0)!
@@ -218,7 +235,9 @@ export function handleBurn(event: BurnEvent): void {
 
   // reset tvl aggregates until new amounts calculated
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(pool.totalValueLockedMatic)
-
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.minus(pool.totalValueLockedMatic)
+  }
   // update globals
   factory.txCount = factory.txCount.plus(ONE_BI)
 
@@ -254,6 +273,12 @@ export function handleBurn(event: BurnEvent): void {
   // reset aggregates with new amounts
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
   factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
+
+  // seer
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.plus(pool.totalValueLockedMatic)
+    factory.totalSeerValueLockedUSD = factory.totalSeerValueLockedMatic.times(bundle.maticPriceUSD)
+  }
 
   // burn entity
   let transaction = loadTransaction(event)
@@ -312,6 +337,9 @@ export function handleSwap(event: SwapEvent): void {
   let bundle = Bundle.load('1')!
   let factory = Factory.load(FACTORY_ADDRESS)!
   let pool = Pool.load(event.address.toHexString())!
+  if (pool === null) {
+    return;
+  }
 
   let oldTick = pool.tick
   let flag = false
@@ -380,14 +408,24 @@ export function handleSwap(event: SwapEvent): void {
   factory.txCount = factory.txCount.plus(ONE_BI)
   factory.totalVolumeMatic = factory.totalVolumeMatic.plus(amountTotalMaticTracked)
   factory.totalVolumeUSD = factory.totalVolumeUSD.plus(amountTotalUSDTracked)
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerVolumeMatic = factory.totalSeerVolumeMatic.plus(amountTotalMaticTracked)
+    factory.totalSeerVolumeUSD = factory.totalSeerVolumeUSD.plus(amountTotalUSDTracked)
+  }
   factory.untrackedVolumeUSD = factory.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   factory.totalFeesMatic = factory.totalFeesMatic.plus(feesMatic)
   factory.totalFeesUSD = factory.totalFeesUSD.plus(feesUSD)
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerFeesMatic = factory.totalSeerFeesMatic.plus(feesMatic)
+    factory.totalSeerFeesUSD = factory.totalSeerFeesUSD.plus(feesUSD)
+  }
 
   // reset aggregate tvl before individual pool tvl updates
   let currentPoolTvlMatic = pool.totalValueLockedMatic
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(currentPoolTvlMatic)
-
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.minus(currentPoolTvlMatic)
+  }
 
   // pool volume
   pool.volumeToken0 = pool.volumeToken0.plus(amount0Abs)
@@ -441,8 +479,8 @@ export function handleSwap(event: SwapEvent): void {
   bundle.maticPriceUSD = getEthPriceInUSD()
   bundle.save()
 
-  token0.derivedMatic = findEthPerToken(token0 as Token)
-  token1.derivedMatic = findEthPerToken(token1 as Token)
+  token0.derivedMatic = findEthPerToken(token0 as Token, event.block)
+  token1.derivedMatic = findEthPerToken(token1 as Token, event.block)
 
   /**
    * Things afffected by new USD rates
@@ -454,6 +492,12 @@ export function handleSwap(event: SwapEvent): void {
 
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
   factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
+
+  // seer
+  if (token0.isSeer || token1.isSeer) {
+    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.plus(pool.totalValueLockedMatic)
+    factory.totalSeerValueLockedUSD = factory.totalSeerValueLockedMatic.times(bundle.maticPriceUSD)
+  }
 
   token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic).times(bundle.maticPriceUSD)
   token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic).times(bundle.maticPriceUSD)
@@ -598,6 +642,9 @@ export function handleCollect(event: Collect): void {
 
   let poolAddress = event.address.toHexString()
   let pool = Pool.load(poolAddress)!
+  if (pool === null) {
+    return;
+  }
   let factory = Factory.load(FACTORY_ADDRESS)!
 
 
@@ -639,6 +686,9 @@ function updateTickFeeVarsAndSave(tick: Tick, event: ethereum.Event): void {
 export function handleChangeFee(event: ChangeFee): void {
 
   let pool = Pool.load(event.address.toHexString())!
+  if (pool === null) {
+    return;
+  }
   pool.fee = BigInt.fromI32(event.params.fee as i32)
   pool.save()
 
@@ -658,6 +708,9 @@ export function handleChangeFee(event: ChangeFee): void {
 
 export function handleSetTickSpacing(event: TickSpacing): void {
   let pool = Pool.load(event.address.toHexString())!
+  if (pool === null) {
+    return;
+  }
   pool.tickSpacing = BigInt.fromI32(event.params.newTickSpacing)
   pool.save()
 }

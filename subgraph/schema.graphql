@@ -113,22 +113,34 @@ type Factory @entity {
   poolCount: BigInt!
   # amoutn of transactions all time
   txCount: BigInt!
+  # total volume all time in derived USD for Seer
+  totalSeerVolumeUSD: BigDecimal!
+  # seer matic volume
+  totalSeerVolumeMatic: BigDecimal!
   # total volume all time in derived USD
   totalVolumeUSD: BigDecimal!
   # total volume all time in derived Matic
   totalVolumeMatic: BigDecimal!
   # total swap fees all time in USD
   totalFeesUSD: BigDecimal!
+  # total seer swap fees all time in USD
+  totalSeerFeesUSD: BigDecimal!
   # total swap fees all time in USD
   totalFeesMatic: BigDecimal!
+  # total seer swap fees all time in Matic
+  totalSeerFeesMatic: BigDecimal!
   # all volume even through less reliable USD values
   untrackedVolumeUSD: BigDecimal!
   # TVL derived in USD
   totalValueLockedUSD: BigDecimal!
+  # total seer TVL derived in USD
+  totalSeerValueLockedUSD: BigDecimal!
   #
   defaultCommunityFee: BigInt!
   # TVL derived in Matic
   totalValueLockedMatic: BigDecimal!
+  # total seer TVL derived in Matic
+  totalSeerValueLockedMatic: BigDecimal!
   # TVL derived in USD untracked
   totalValueLockedUSDUntracked: BigDecimal!
   # TVL derived in Matic untracked
@@ -857,6 +869,7 @@ type EternalFarming @entity {
   pool: Bytes!
   startTime: BigInt!
   endTime: BigInt!
+  endTimeImplied: BigInt!
   reward: BigInt!
   bonusReward: BigInt!
   rewardRate: BigInt!

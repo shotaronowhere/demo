@@ -1,21 +1,25 @@
 /* eslint-disable prefer-const */
 import { ONE_BD, ZERO_BD, ZERO_BI } from './constants'
 import { Bundle, Pool, Token } from '../../../generated/schema'
-import { BigDecimal, BigInt } from '@graphprotocol/graph-ts'
+import { Address, BigDecimal, BigInt, ethereum } from '@graphprotocol/graph-ts'
 import { exponentToBigDecimal, safeDiv } from '../utils/index'
-
+// import sdai abi generated
+import { Sdai } from '../../../generated/Factory/Sdai'
 const WMatic_ADDRESS = '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d'
+const sdai = '0xaf204776c7245bf4147c2612bf6e5972ee483701'
 const USDC_WMatic_03_POOL = '0x308c5b91f63307439fdb51a9fa4dfc979e2ed6b0'
 
 // token where amounts should contribute to tracked volume and liquidity
-// usually tokens that many tokens are paired with s
+// usually tokens that many tokens are paired with 
+// s
 export let WHITELIST_TOKENS: string[] = [
-  '0x532801ED6f82FFfD2DAB70A19fC2d7B2772C4f4b', // SWPR
   '0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1', // WETH
+  '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d', // WXDAI
   '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb', // GNO 
   '0x8e5bBbb09Ed1ebdE8674Cda39A0c169401db4252', // WBTC
   '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83', // USDC
   '0x1e2c4fb7ede391d116e6b41cd0608260e8801d59', // bCSPX
+  '0xaf204776c7245bf4147c2612bf6e5972ee483701'  // sdai
 ]
 
 let MINIMUM_Matic_LOCKED = BigDecimal.fromString('0')
@@ -24,6 +28,7 @@ let Q192 = Math.pow(2, 192)
 
 let STABLE_COINS: string[] = [
   '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83', // USDC
+  '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d', // wxdai
 ]
 
 
@@ -40,12 +45,7 @@ export function priceToTokenPrices(price: BigInt, token0: Token, token1: Token):
 }
 
 export function getEthPriceInUSD(): BigDecimal {
-  let usdcPool = Pool.load(USDC_WMatic_03_POOL) // dai is token0
-  if (usdcPool !== null) {
-    return usdcPool.token1Price
-  } else {
-    return ZERO_BD
-  }
+  return ONE_BD // hardcode xdai as 1:1 with USD
 }
 
 
@@ -53,9 +53,20 @@ export function getEthPriceInUSD(): BigDecimal {
  * Search through graph to find derived Eth per token.
  * @todo update to be derived Matic (add stablecoin estimates)
  **/
-export function findEthPerToken(token: Token): BigDecimal {
+export function findEthPerToken(token: Token, block: ethereum.Block): BigDecimal {
   if (token.id == WMatic_ADDRESS) {
     return ONE_BD
+  }
+  if (token.id == sdai) {
+    if (block.number.lt(BigInt.fromString('30195209'))) {
+      return BigDecimal.fromString('1')
+    }
+    // call sdai contract to get price
+    let sdaiContract = Sdai.bind(Address.fromString(sdai))
+    let price = sdaiContract.convertToAssets(BigInt.fromString('1000000000000000000'))
+
+    // convert to decimal
+    return price.toBigDecimal().div(BigDecimal.fromString('1000000000000000000'))
   }
   let whiteList = token.whitelistPools
   // for now just take USD from pool with greatest TVL

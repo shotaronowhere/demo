@@ -13,7 +13,6 @@ import { convertTokenToDecimal, loadTransaction } from '../utils'
 import { FarmingCenterAddress } from '../../algebra-farming/utils/constants'
 
 
-
 function getPosition(event: ethereum.Event, tokenId: BigInt): Position | null {
 
 
@@ -119,10 +118,12 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
   if (position == null) {
     return
   }
-
   let token0 = Token.load(position.token0)
   let token1 = Token.load(position.token1)
 
+  if (token0 == null || token1 == null) {
+    return
+  }
 
 
   let amount1 = ZERO_BD
@@ -184,6 +185,9 @@ export function handleDecreaseLiquidity(event: DecreaseLiquidity): void {
   let token0 = Token.load(position.token0)
   let token1 = Token.load(position.token1)
 
+  if (token0 == null || token1 == null) {
+    return
+  }
 
   let amount1 = ZERO_BD
   let amount0 = ZERO_BD
@@ -232,6 +236,9 @@ export function handleCollect(event: Collect): void {
   let token0 = Token.load(position.token0)
   let token1 = Token.load(position.token1)
 
+  if (token0 == null || token1 == null) {
+    return
+  }
 
   let amount1 = ZERO_BD
   let amount0 = ZERO_BD
@@ -272,6 +279,21 @@ export function handleTransfer(event: Transfer): void {
   if (position == null) {
     return
   }
+
+  let token0 = Token.load(position.token0)
+  let token1 = Token.load(position.token1)
+
+  // atleast 1 token must be a seer token
+  if (token0 === null) {
+    if (token1 === null) {
+      return;
+    } else {
+      if (!token1.isSeer) {
+        return;
+      }
+    }
+  }
+
 
   position.owner = event.params.to
   position.save()

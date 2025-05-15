@@ -1,7 +1,7 @@
 specVersion: 1.0.0
 description: Combined subgraph for Algebra DEX, Farming, and Prediction Markets
 indexerHints:
-  prune: auto
+  prune: never
 schema:
   file: ./schema.graphql
 dataSources:
@@ -21,6 +21,8 @@ dataSources:
         - Pool
         - Token
       abis:
+        - name: Sdai
+          file: ./abis/Sdai.json
         - name: Factory
           file: ./abis/factory.json
         - name: ERC20
@@ -130,7 +132,7 @@ dataSources:
       startBlock: 30096672
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.6
+      apiVersion: 0.0.7
       language: wasm/assemblyscript
       file: ./src/algebra-farming/mappings/center.ts
       entities:
@@ -152,12 +154,12 @@ dataSources:
     name: LimitFarming
     network: gnosis
     source:
-      address: "0xA01e2785d2D04cC0a09Bde9C3eA49Bf0aD7811F2"
       abi: LimitFarming
+      address: "0xA01e2785d2D04cC0a09Bde9C3eA49Bf0aD7811F2"
       startBlock: 30096667
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.6
+      apiVersion: 0.0.7
       language: wasm/assemblyscript
       file: ./src/algebra-farming/mappings/limitFarming.ts
       entities:
@@ -343,13 +345,15 @@ templates:
       abi: Pool
     mapping:
       kind: ethereum/events
-      apiVersion: 0.0.6
+      apiVersion: 0.0.7
       language: wasm/assemblyscript
       file: ./src/algebra/mappings/core.ts
       entities:
         - Pool
         - Token
       abis:
+        - name: Sdai
+          file: ./abis/Sdai.json
         - name: Pool
           file: ./abis/pool.json
         - name: Factory

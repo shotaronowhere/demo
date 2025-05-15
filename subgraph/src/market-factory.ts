@@ -148,6 +148,9 @@ export function handleNewMarket(event: NewMarketEvent): void {
     token1.isSeer = true
   }
 
+  token0.save()
+  token1.save()
+
 
   processMarket(
     event,

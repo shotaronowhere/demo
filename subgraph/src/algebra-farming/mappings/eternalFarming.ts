@@ -10,7 +10,7 @@ import {
   RewardAmountsDecreased,
   RewardsCollected
 } from '../../../generated/EternalFarming/EternalFarming';
-import { Deposit, Reward, EternalFarming } from '../../../generated/schema';
+import { Deposit, Reward, EternalFarming, Pool } from '../../../generated/schema';
 import { createTokenEntity } from '../utils/token'
 
 export function handleIncentiveCreated(event: EternalFarmingCreated): void {
@@ -21,6 +21,13 @@ export function handleIncentiveCreated(event: EternalFarmingCreated): void {
     ethereum.Value.fromUnsignedBigInt(event.params.startTime),
     ethereum.Value.fromUnsignedBigInt(event.params.endTime)
   ];
+
+
+  // load pool, make sure its not null
+  let pool = Pool.load(event.params.pool.toHexString())
+  if (pool === null) {
+    return;
+  }
 
   createTokenEntity(event.params.rewardToken)
   createTokenEntity(event.params.bonusRewardToken)
@@ -40,9 +47,10 @@ export function handleIncentiveCreated(event: EternalFarmingCreated): void {
     entity.bonusReward = BigInt.fromString("0");
     entity.rewardRate = BigInt.fromString("0");
     entity.bonusRewardRate = BigInt.fromString("0");
+    entity.endTimeImplied = BigInt.fromString("0");
   }
-
-
+  entity.reward = event.params.reward;
+  entity.bonusReward = event.params.bonusReward;
   entity.rewardToken = event.params.rewardToken;
   entity.bonusRewardToken = event.params.bonusRewardToken;
   entity.pool = event.params.pool;
@@ -166,6 +174,7 @@ export function handleRewardAmountsDecreased(event: RewardAmountsDecreased): voi
   if (incentive) {
     incentive.bonusReward -= event.params.bonusReward
     incentive.reward -= event.params.reward
+    incentive.endTimeImplied = incentive.startTime.plus(incentive.reward.div(incentive.rewardRate))
     incentive.save()
   }
 }
@@ -175,6 +184,7 @@ export function handleRewardsRatesChanged(event: RewardsRatesChanged): void {
   if (eternalFarming) {
     eternalFarming.rewardRate = event.params.rewardRate
     eternalFarming.bonusRewardRate = event.params.bonusRewardRate
+    eternalFarming.endTimeImplied = eternalFarming.startTime.plus(eternalFarming.reward.div(eternalFarming.rewardRate))
     eternalFarming.save()
   }
 }
@@ -184,6 +194,9 @@ export function handleRewardsAdded(event: RewardsAdded): void {
   if (eternalFarming) {
     eternalFarming.reward += event.params.rewardAmount
     eternalFarming.bonusReward += event.params.bonusRewardAmount
+    if (eternalFarming.rewardRate != BigInt.fromString("0")) {
+      eternalFarming.endTimeImplied = eternalFarming.startTime.plus(eternalFarming.reward.div(eternalFarming.rewardRate))
+    }
     eternalFarming.save()
   }
 }

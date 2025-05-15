@@ -8,7 +8,7 @@ import {
   RewardsAdded,
   RewardAmountsDecreased
 } from '../../../generated/LimitFarming/LimitFarming';
-import { LimitFarming, Deposit, Reward } from '../../../generated/schema';
+import { LimitFarming, Deposit, Reward, Pool } from '../../../generated/schema';
 import { createTokenEntity } from '../utils/token';
 
 
@@ -21,6 +21,12 @@ export function handleIncentiveCreated(event: LimitFarmingCreated): void {
     ethereum.Value.fromUnsignedBigInt(event.params.startTime),
     ethereum.Value.fromUnsignedBigInt(event.params.endTime)
   ];
+
+  // load pool, make sure its not null
+  let pool = Pool.load(event.params.pool.toHexString())
+  if (pool === null) {
+    return;
+  }
 
   createTokenEntity(event.params.rewardToken)
   createTokenEntity(event.params.bonusRewardToken)
