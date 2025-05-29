@@ -5,7 +5,7 @@ import { StaticTokenDefinition } from './staticTokenDefinition'
 import { BigInt, Address, log } from '@graphprotocol/graph-ts'
 import { Token } from '../../../generated/schema';
 import { fetchTokenTotalSupply } from '../../algebra/utils/token'
-import { ZERO_BD, ZERO_BI } from '../../algebra/utils/constants'
+import { ADDRESS_ZERO, ZERO_BD, ZERO_BI } from '../../algebra/utils/constants'
 
 function isNullEthValue(value: string): boolean {
   return value == '0x0000000000000000000000000000000000000000000000000000000000000001'
@@ -113,6 +113,7 @@ export function createTokenEntity(tokenAddress: Address): void {
     token.poolCount = ZERO_BI
     token.whitelistPools = []
     token.isSeer = false
+    token.market = ADDRESS_ZERO
     token.save()
   }
 

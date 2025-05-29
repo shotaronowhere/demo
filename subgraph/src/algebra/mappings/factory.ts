@@ -1,6 +1,6 @@
 import { WHITELIST_TOKENS } from './../utils/pricing'
 /* eslint-disable prefer-const */
-import { FACTORY_ADDRESS, ZERO_BI, ONE_BI, ZERO_BD, ADDRESS_ZERO, pools_list } from './../utils/constants'
+import { FACTORY_ADDRESS, ZERO_BI, ONE_BI, ZERO_BD, ADDRESS_ZERO, pools_list, SDAI_ADDRESS } from './../utils/constants'
 import { Factory } from '../../../generated/schema'
 import { Pool as PoolEvent } from '../../../generated/Factory/Factory'
 import { DefaultCommunityFee } from '../../../generated/Factory/Factory'
@@ -35,6 +35,7 @@ function newToken(token_address: Address): Token | null {
   token.poolCount = ZERO_BI
   token.whitelistPools = []
   token.isSeer = false
+  token.market = ADDRESS_ZERO
   token.save()
   return token
 }
@@ -47,30 +48,17 @@ export function handlePoolCreated(event: PoolEvent): void {
   let token0 = Token.load(token0_address.toHexString())
   let token1 = Token.load(token1_address.toHexString())
 
-  // only tracke whitelist - whitelist pools or seer tokens
-  if (!token0 && WHITELIST_TOKENS.includes(token0_address.toHexString())) {
+  // only sdai and seer tokens
+  if (token0_address.toHexString() == SDAI_ADDRESS) {
     token0 = newToken(token0_address)
   }
-  if (!token1 && WHITELIST_TOKENS.includes(token1_address.toHexString())) {
+  if (token1_address.toHexString() == SDAI_ADDRESS) {
     token1 = newToken(token1_address)
   }
 
   // either both tokens are whitelisted or atleast 1 token must be a seer token
-  if (!token0 && !token1) {
+  if (!token0 || !token1) {
     return
-  }
-
-  if (!token0) {
-    token0 = newToken(token0_address)
-    if (token0 === null) {
-      return
-    }
-  }
-  if (!token1) {
-    token1 = newToken(token1_address)
-    if (token1 === null) {
-      return
-    }
   }
 
   // temp fix
@@ -81,17 +69,11 @@ export function handlePoolCreated(event: PoolEvent): void {
     factory.poolCount = ZERO_BI
     factory.totalVolumeMatic = ZERO_BD
     factory.totalVolumeUSD = ZERO_BD
-    factory.totalSeerVolumeUSD = ZERO_BD
-    factory.totalSeerVolumeMatic = ZERO_BD
     factory.untrackedVolumeUSD = ZERO_BD
     factory.totalFeesUSD = ZERO_BD
-    factory.totalSeerFeesUSD = ZERO_BD
     factory.totalFeesMatic = ZERO_BD
-    factory.totalSeerFeesMatic = ZERO_BD
     factory.totalValueLockedMatic = ZERO_BD
-    factory.totalSeerValueLockedMatic = ZERO_BD
     factory.totalValueLockedUSD = ZERO_BD
-    factory.totalSeerValueLockedUSD = ZERO_BD
     factory.totalValueLockedUSDUntracked = ZERO_BD
     factory.totalValueLockedMaticUntracked = ZERO_BD
     factory.txCount = ZERO_BI
@@ -179,16 +161,11 @@ export function handleDefaultCommFeeChange(event: DefaultCommunityFee): void {
     factory.poolCount = ZERO_BI
     factory.totalVolumeMatic = ZERO_BD
     factory.totalVolumeUSD = ZERO_BD
-    factory.totalSeerVolumeMatic = ZERO_BD
     factory.untrackedVolumeUSD = ZERO_BD
     factory.totalFeesUSD = ZERO_BD
-    factory.totalSeerFeesUSD = ZERO_BD
     factory.totalFeesMatic = ZERO_BD
-    factory.totalSeerFeesMatic = ZERO_BD
     factory.totalValueLockedMatic = ZERO_BD
     factory.totalValueLockedUSD = ZERO_BD
-    factory.totalSeerValueLockedMatic = ZERO_BD
-    factory.totalSeerValueLockedUSD = ZERO_BD
     factory.totalValueLockedUSDUntracked = ZERO_BD
     factory.totalValueLockedMaticUntracked = ZERO_BD
     factory.txCount = ZERO_BI

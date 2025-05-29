@@ -41,6 +41,19 @@ type Market @entity {
   finalizeTs: BigInt!
   questionsInArbitration: BigInt!
   index: BigInt!
+  # liquidity across all pools in token units
+  totalValueLocked: BigDecimal!
+  # liquidity across all pools in derived USD
+  totalValueLockedUSD: BigDecimal!
+  # TVL derived in USD untracked
+  totalValueLockedUSDUntracked: BigDecimal!
+  # volume in token units
+  volume: BigDecimal!
+  # volume in derived USD
+  volumeUSD: BigDecimal!
+  # volume in USD even on pools with less reliable USD values
+  untrackedVolumeUSD: BigDecimal!
+  tokens: [Token!]! @derivedFrom(field: "market")
 }
 
 type MarketsCount @entity {
@@ -113,34 +126,24 @@ type Factory @entity {
   poolCount: BigInt!
   # amoutn of transactions all time
   txCount: BigInt!
-  # total volume all time in derived USD for Seer
-  totalSeerVolumeUSD: BigDecimal!
-  # seer matic volume
-  totalSeerVolumeMatic: BigDecimal!
+
   # total volume all time in derived USD
   totalVolumeUSD: BigDecimal!
   # total volume all time in derived Matic
   totalVolumeMatic: BigDecimal!
   # total swap fees all time in USD
   totalFeesUSD: BigDecimal!
-  # total seer swap fees all time in USD
-  totalSeerFeesUSD: BigDecimal!
+
   # total swap fees all time in USD
   totalFeesMatic: BigDecimal!
-  # total seer swap fees all time in Matic
-  totalSeerFeesMatic: BigDecimal!
   # all volume even through less reliable USD values
   untrackedVolumeUSD: BigDecimal!
   # TVL derived in USD
   totalValueLockedUSD: BigDecimal!
-  # total seer TVL derived in USD
-  totalSeerValueLockedUSD: BigDecimal!
   #
   defaultCommunityFee: BigInt!
   # TVL derived in Matic
   totalValueLockedMatic: BigDecimal!
-  # total seer TVL derived in Matic
-  totalSeerValueLockedMatic: BigDecimal!
   # TVL derived in USD untracked
   totalValueLockedUSDUntracked: BigDecimal!
   # TVL derived in Matic untracked
@@ -193,6 +196,7 @@ type Token @entity {
   tokenDayData: [TokenDayData!]! @derivedFrom(field: "token")
   # seer token
   isSeer: Boolean!
+  market: Market!
 }
 
 
@@ -263,6 +267,11 @@ type Pool @entity {
   totalValueLockedUSDUntracked: BigDecimal!
   # Fields used to help derived relationship
   liquidityProviderCount: BigInt! # used to detect new exchanges
+  
+  # --- ADDED FOR ETERNAL FARMING ---
+  eternalFarm: EternalFarming @derivedFrom(field: "pool")
+  # --- END ADDED FOR ETERNAL FARMING ---
+
   # hourly snapshots of pool data
   poolHourData: [PoolHourData!]! @derivedFrom(field: "pool")
   # daily snapshots of pool data
@@ -866,7 +875,7 @@ type EternalFarming @entity {
   rewardToken: Bytes!
   bonusRewardToken: Bytes!
   virtualPool: Bytes!
-  pool: Bytes!
+  pool: Pool!
   startTime: BigInt!
   endTime: BigInt!
   endTimeImplied: BigInt!
@@ -883,19 +892,31 @@ type EternalFarming @entity {
   tier2Multiplier: BigInt!
   tier3Multiplier: BigInt!
   multiplierToken: Bytes!
+  # --- ADDED FOR DERIVED DEPOSITS ---
+  deposits: [Deposit!]! @derivedFrom(field: "eternalFarming")
+  # --- END ADDED FOR DERIVED DEPOSITS ---
+  # --- ADDED totalLiquidity and totalActiveLiquidity as discussed ---
+  totalLiquidity: BigInt! # Total liquidity staked in this farm
+  totalActiveLiquidity: BigInt! # Total liquidity currently eligible for rewards
+  # --- END ---
 }
 
 type Deposit @entity {
-  id: ID!
+  id: ID! # This is the NFT Token ID from NonfungiblePositionManager
   L2tokenId: BigInt!
-  owner: Bytes!
-  onFarmingCenter: Boolean!
-  pool: Bytes!
-  limitFarming: Bytes
-  eternalFarming: Bytes
+  owner: Bytes! # Current owner of the NFT
+  onFarmingCenter: Boolean! # True if the NFT is staked in the FarmingCenter
+  pool: Pool! # Pool the underlying position is in (set from Position data)
+  limitFarming: LimitFarming # Link to LimitFarming if staked
+  eternalFarming: EternalFarming # Link to EternalFarming if staked
   enteredInEternalFarming: BigInt 
-  liquidity: BigInt!
-  rangeLength: BigInt!
+  liquidity: BigInt! # Liquidity of the position (can be updated by Increase/DecreaseLiquidity on NPM)
+  # For eternal farming, this liquidity value is snapshotted at the moment of staking into the farm (FarmEntered event)
+  # and used for that farm's accounting, to avoid discrepancies if underlying NFT liquidity changes while staked.
+  
+  # Fields derived or copied from the underlying Position for convenience in farm eligibility checks
+  rangeLength: BigInt! # (tickUpper - tickLower) for the position
+  
   tokensLockedLimit: BigInt!
   tokensLockedEternal: BigInt!
   tierLimit: BigInt!
@@ -907,4 +928,40 @@ type Reward @entity{
   rewardAddress: Bytes!
   amount: BigInt!
   owner: Bytes!
+}
+
+type MarketDayData @entity {
+  id: ID!
+  date: Int!
+  market: Market!
+  # volume in token units
+  volume: BigDecimal!
+  # volume in derived USD
+  volumeUSD: BigDecimal!
+  # volume in USD even on pools with less reliable USD values
+  untrackedVolumeUSD: BigDecimal!
+  # liquidity across all pools in token units
+  totalValueLocked: BigDecimal!
+  # liquidity across all pools in derived USD
+  totalValueLockedUSD: BigDecimal!
+  # TVL derived in USD untracked
+  totalValueLockedUSDUntracked: BigDecimal!
+}
+
+type MarketHourData @entity {
+  id: ID!
+  periodStartUnix: Int!
+  market: Market!
+  # volume in token units
+  volume: BigDecimal!
+  # volume in derived USD
+  volumeUSD: BigDecimal!
+  # volume in USD even on pools with less reliable USD values
+  untrackedVolumeUSD: BigDecimal!
+  # liquidity across all pools in token units
+  totalValueLocked: BigDecimal!
+  # liquidity across all pools in derived USD
+  totalValueLockedUSD: BigDecimal!
+  # TVL derived in USD untracked
+  totalValueLockedUSDUntracked: BigDecimal!
 }

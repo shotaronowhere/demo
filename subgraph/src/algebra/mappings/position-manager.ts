@@ -159,7 +159,7 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
   if (entity == null) {
     entity = new Deposit(event.params.tokenId.toString());
     entity.owner = event.transaction.from;
-    entity.pool = event.params.pool;
+    entity.pool = event.params.pool.toHexString();
     entity.onFarmingCenter = false;
     entity.liquidity = BigInt.fromString("0")
     entity.rangeLength = getRangeLength(event.params.tokenId, event.address)

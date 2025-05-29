@@ -1,5 +1,5 @@
 /* eslint-disable prefer-const */
-import { Bundle, Burn, Factory, Mint, Pool, Swap, Tick, PoolPosition, Token, PoolFeeData } from '../../../generated/schema'
+import { Bundle, Burn, Factory, Mint, Pool, Swap, Tick, PoolPosition, Token, PoolFeeData, Market } from '../../../generated/schema'
 import { Pool as PoolABI } from '../../../generated/Factory/Pool'
 import { BigDecimal, BigInt, ethereum, log } from '@graphprotocol/graph-ts'
 
@@ -26,6 +26,8 @@ import {
   updateFeeHourData
 } from '../utils/intervalUpdates'
 import { createTick } from '../utils/tick'
+import { updateMarketDayData, updateMarketHourData } from '../utils/marketUpdates'
+import { updateEternalFarmingActiveLiquidity } from '../../algebra-farming/mappings/eternalFarming'
 
 export function handleInitialize(event: Initialize): void {
   let pool = Pool.load(event.address.toHexString())!
@@ -51,7 +53,6 @@ export function handleInitialize(event: Initialize): void {
   token1.derivedMatic = findEthPerToken(token1 as Token, event.block)
   token0.save()
   token1.save()
-
 }
 
 export function handleMint(event: MintEvent): void {
@@ -83,9 +84,6 @@ export function handleMint(event: MintEvent): void {
 
   // reset tvl aggregates until new amounts calculated
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(pool.totalValueLockedMatic)
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.minus(pool.totalValueLockedMatic)
-  }
   // update globals
   factory.txCount = factory.txCount.plus(ONE_BI)
 
@@ -122,11 +120,7 @@ export function handleMint(event: MintEvent): void {
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
   factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
 
-  // seer
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.plus(pool.totalValueLockedMatic)
-    factory.totalSeerValueLockedUSD = factory.totalSeerValueLockedMatic.times(bundle.maticPriceUSD)
-  }
+
 
   let transaction = loadTransaction(event)
   let mint = new Mint(transaction.id.toString() + '#' + pool.txCount.toString())
@@ -172,7 +166,7 @@ export function handleMint(event: MintEvent): void {
   let poolPositionid = pool.id + "#" + event.params.owner.toHexString() + '#' + BigInt.fromI32(event.params.bottomTick).toString() + "#" + BigInt.fromI32(event.params.topTick).toString()
   let poolPosition = PoolPosition.load(poolPositionid)
   if (poolPosition) {
-    poolPosition.liquidity += event.params.liquidityAmount
+    poolPosition.liquidity = poolPosition.liquidity.plus(event.params.liquidityAmount)
   }
   else {
     poolPosition = new PoolPosition(poolPositionid)
@@ -193,6 +187,47 @@ export function handleMint(event: MintEvent): void {
   updateTokenHourData(token0 as Token, event)
   updateTokenHourData(token1 as Token, event)
 
+  // Update Market Day/Hour Data based on potentially updated Market TVL
+  let market0_mint = Market.load(token0.market)
+  if (market0_mint) {
+    let amount0USD_val = amount0.times(token0.derivedMatic.times(bundle.maticPriceUSD))
+    market0_mint.totalValueLocked = market0_mint.totalValueLocked.plus(amount0)
+    market0_mint.totalValueLockedUSD = market0_mint.totalValueLockedUSD.plus(amount0USD_val)
+    market0_mint.totalValueLockedUSDUntracked = market0_mint.totalValueLockedUSDUntracked.plus(amount0USD_val) // Assuming same for untracked for now
+    market0_mint.save()
+    updateMarketDayData(market0_mint, event)
+    updateMarketHourData(market0_mint, event)
+  }
+
+  let market1_mint = Market.load(token1.market)
+  if (market1_mint) {
+    let amount1USD_val = amount1.times(token1.derivedMatic.times(bundle.maticPriceUSD))
+    // Check if different market to avoid double counting TVL
+    if (market0_mint === null || market1_mint.id != market0_mint.id) {
+      market1_mint.totalValueLocked = market1_mint.totalValueLocked.plus(amount1)
+      market1_mint.totalValueLockedUSD = market1_mint.totalValueLockedUSD.plus(amount1USD_val)
+      market1_mint.totalValueLockedUSDUntracked = market1_mint.totalValueLockedUSDUntracked.plus(amount1USD_val) // Assuming same for untracked for now
+      market1_mint.save()
+      updateMarketDayData(market1_mint, event)
+      updateMarketHourData(market1_mint, event)
+    } else if (market0_mint !== null && market1_mint.id == market0_mint.id) {
+      // If it's the same market, it has already been updated by market0_mint logic for its token0 component (amount0).
+      // We only need to add the token1 component (amount1) to the already updated market0_mint.
+      // This ensures totalValueLocked reflects both amount0 and amount1 for the *same* market.
+      // Note: market0_mint was saved before, so we are loading it again effectively here if we used market0_mint.plus() directly on the old var.
+      // Instead, we act on market0_mint which IS the single market entity for both tokens.
+      market0_mint.totalValueLocked = market0_mint.totalValueLocked.plus(amount1) // Add amount1 to existing market TVL
+      market0_mint.totalValueLockedUSD = market0_mint.totalValueLockedUSD.plus(amount1USD_val)
+      market0_mint.totalValueLockedUSDUntracked = market0_mint.totalValueLockedUSDUntracked.plus(amount1USD_val)
+      market0_mint.save() // Save again with amount1 contribution
+      // No need to call updateMarketDay/HourData again, it was called after amount0 update and will reflect this save.
+      // Or, call it again to be absolutely sure it reflects the sum if marketUpdates aren't cumulative themselves.
+      // Given marketUpdates copy from market, calling again after this final save is safest.
+      updateMarketDayData(market0_mint, event)
+      updateMarketHourData(market0_mint, event)
+    }
+  }
+
   token0.save()
   token1.save()
   pool.save()
@@ -203,7 +238,6 @@ export function handleMint(event: MintEvent): void {
   // Update inner tick vars and save the ticks
   updateTickFeeVarsAndSave(lowerTick, event)
   updateTickFeeVarsAndSave(upperTick, event)
-
 }
 
 export function handleBurn(event: BurnEvent): void {
@@ -235,9 +269,6 @@ export function handleBurn(event: BurnEvent): void {
 
   // reset tvl aggregates until new amounts calculated
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(pool.totalValueLockedMatic)
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.minus(pool.totalValueLockedMatic)
-  }
   // update globals
   factory.txCount = factory.txCount.plus(ONE_BI)
 
@@ -274,11 +305,7 @@ export function handleBurn(event: BurnEvent): void {
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
   factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
 
-  // seer
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.plus(pool.totalValueLockedMatic)
-    factory.totalSeerValueLockedUSD = factory.totalSeerValueLockedMatic.times(bundle.maticPriceUSD)
-  }
+
 
   // burn entity
   let transaction = loadTransaction(event)
@@ -312,7 +339,7 @@ export function handleBurn(event: BurnEvent): void {
   let poolPositionid = pool.id + "#" + event.params.owner.toHexString() + '#' + BigInt.fromI32(event.params.bottomTick).toString() + "#" + BigInt.fromI32(event.params.topTick).toString()
   let poolPosition = PoolPosition.load(poolPositionid)
   if (poolPosition) {
-    poolPosition.liquidity -= event.params.liquidityAmount
+    poolPosition.liquidity = poolPosition.liquidity.minus(event.params.liquidityAmount)
     poolPosition.save()
   }
 
@@ -325,6 +352,39 @@ export function handleBurn(event: BurnEvent): void {
   updateTokenHourData(token1 as Token, event)
   updateTickFeeVarsAndSave(lowerTick, event)
   updateTickFeeVarsAndSave(upperTick, event)
+
+  // Update Market Day/Hour Data based on potentially updated Market TVL
+  let market0_burn = Market.load(token0.market)
+  if (market0_burn) {
+    let amount0USD_val = amount0.times(token0.derivedMatic.times(bundle.maticPriceUSD))
+    market0_burn.totalValueLocked = market0_burn.totalValueLocked.minus(amount0)
+    market0_burn.totalValueLockedUSD = market0_burn.totalValueLockedUSD.minus(amount0USD_val)
+    market0_burn.totalValueLockedUSDUntracked = market0_burn.totalValueLockedUSDUntracked.minus(amount0USD_val)
+    market0_burn.save()
+    updateMarketDayData(market0_burn, event)
+    updateMarketHourData(market0_burn, event)
+  }
+
+  let market1_burn = Market.load(token1.market)
+  if (market1_burn) {
+    let amount1USD_val = amount1.times(token1.derivedMatic.times(bundle.maticPriceUSD))
+    if (market0_burn === null || market1_burn.id != market0_burn.id) {
+      market1_burn.totalValueLocked = market1_burn.totalValueLocked.minus(amount1)
+      market1_burn.totalValueLockedUSD = market1_burn.totalValueLockedUSD.minus(amount1USD_val)
+      market1_burn.totalValueLockedUSDUntracked = market1_burn.totalValueLockedUSDUntracked.minus(amount1USD_val)
+      market1_burn.save()
+      updateMarketDayData(market1_burn, event)
+      updateMarketHourData(market1_burn, event)
+    } else if (market0_burn !== null && market1_burn.id == market0_burn.id) {
+      // Same market, apply amount1 changes to the already modified market0_burn entity
+      market0_burn.totalValueLocked = market0_burn.totalValueLocked.minus(amount1)
+      market0_burn.totalValueLockedUSD = market0_burn.totalValueLockedUSD.minus(amount1USD_val)
+      market0_burn.totalValueLockedUSDUntracked = market0_burn.totalValueLockedUSDUntracked.minus(amount1USD_val)
+      market0_burn.save()
+      updateMarketDayData(market0_burn, event)
+      updateMarketHourData(market0_burn, event)
+    }
+  }
 
   token0.save()
   token1.save()
@@ -342,45 +402,37 @@ export function handleSwap(event: SwapEvent): void {
   }
 
   let oldTick = pool.tick
-  let flag = false
-
 
   let token0 = Token.load(pool.token0)!
   let token1 = Token.load(pool.token1)!
 
-
-  let amount0 = convertTokenToDecimal(event.params.amount0, token0.decimals)
-  let amount1 = convertTokenToDecimal(event.params.amount1, token1.decimals)
+  let amount0_ = convertTokenToDecimal(event.params.amount0, token0.decimals)
+  let amount1_ = convertTokenToDecimal(event.params.amount1, token1.decimals)
 
   if (pools_list.includes(event.address.toHexString())) {
-
-    amount0 = convertTokenToDecimal(event.params.amount1, token0.decimals)
-    amount1 = convertTokenToDecimal(event.params.amount0, token1.decimals)
-
-
+    amount0_ = convertTokenToDecimal(event.params.amount1, token0.decimals)
+    amount1_ = convertTokenToDecimal(event.params.amount0, token1.decimals)
   }
 
   // need absolute amounts for volume
-  let amount0Abs = amount0
-  if (amount0.lt(ZERO_BD)) {
-    amount0Abs = amount0.times(BigDecimal.fromString('-1'))
+  let amount0Abs = amount0_
+  if (amount0_.lt(ZERO_BD)) {
+    amount0Abs = amount0_.times(BigDecimal.fromString('-1'))
   }
   else {
-    let communityFeeAmount = amount0.times(BigDecimal.fromString((pool.fee.times(pool.communityFee0).toString())).div(BigDecimal.fromString('1000000000')))
-    communityFeeAmount = communityFeeAmount.times(BigDecimal.fromString("1"))
-    amount0 = amount0.minus(communityFeeAmount)
-    amount0Abs = amount0
+    let communityFeeAmount = amount0_.times(BigDecimal.fromString((pool.fee.times(pool.communityFee0).toString())).div(BigDecimal.fromString('1000000000')))
+    amount0_ = amount0_.minus(communityFeeAmount)
+    amount0Abs = amount0_
   }
 
-  let amount1Abs = amount1
-  if (amount1.lt(ZERO_BD)) {
-    amount1Abs = amount1.times(BigDecimal.fromString('-1'))
+  let amount1Abs = amount1_
+  if (amount1_.lt(ZERO_BD)) {
+    amount1Abs = amount1_.times(BigDecimal.fromString('-1'))
   }
   else {
-    let communityFeeAmount = amount1.times(BigDecimal.fromString((pool.fee.times(pool.communityFee1).toString())).div(BigDecimal.fromString('1000000000')))
-    communityFeeAmount = communityFeeAmount.times(BigDecimal.fromString("1"))
-    amount1 = amount1.minus(communityFeeAmount)
-    amount1Abs = amount1
+    let communityFeeAmount = amount1_.times(BigDecimal.fromString((pool.fee.times(pool.communityFee1).toString())).div(BigDecimal.fromString('1000000000')))
+    amount1_ = amount1_.minus(communityFeeAmount)
+    amount1Abs = amount1_
   }
 
   let amount0Matic = amount0Abs.times(token0.derivedMatic)
@@ -388,8 +440,6 @@ export function handleSwap(event: SwapEvent): void {
 
   let amount0USD = amount0Matic.times(bundle.maticPriceUSD)
   let amount1USD = amount1Matic.times(bundle.maticPriceUSD)
-
-
 
   // get amount that should be tracked only - div 2 because cant count both input and output as volume
   let amountTotalUSDTracked = getTrackedAmountUSD(amount0Abs, token0 as Token, amount1Abs, token1 as Token).div(
@@ -401,31 +451,19 @@ export function handleSwap(event: SwapEvent): void {
 
   let feesMatic = amountTotalMaticTracked.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000'))
   let feesUSD = amountTotalUSDTracked.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000'))
-  let untrackedFees = amountTotalUSDUntracked.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000'))
-
 
   // global updates
   factory.txCount = factory.txCount.plus(ONE_BI)
   factory.totalVolumeMatic = factory.totalVolumeMatic.plus(amountTotalMaticTracked)
   factory.totalVolumeUSD = factory.totalVolumeUSD.plus(amountTotalUSDTracked)
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerVolumeMatic = factory.totalSeerVolumeMatic.plus(amountTotalMaticTracked)
-    factory.totalSeerVolumeUSD = factory.totalSeerVolumeUSD.plus(amountTotalUSDTracked)
-  }
+
   factory.untrackedVolumeUSD = factory.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   factory.totalFeesMatic = factory.totalFeesMatic.plus(feesMatic)
   factory.totalFeesUSD = factory.totalFeesUSD.plus(feesUSD)
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerFeesMatic = factory.totalSeerFeesMatic.plus(feesMatic)
-    factory.totalSeerFeesUSD = factory.totalSeerFeesUSD.plus(feesUSD)
-  }
 
   // reset aggregate tvl before individual pool tvl updates
   let currentPoolTvlMatic = pool.totalValueLockedMatic
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(currentPoolTvlMatic)
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.minus(currentPoolTvlMatic)
-  }
 
   // pool volume
   pool.volumeToken0 = pool.volumeToken0.plus(amount0Abs)
@@ -433,19 +471,24 @@ export function handleSwap(event: SwapEvent): void {
   pool.volumeUSD = pool.volumeUSD.plus(amountTotalUSDTracked)
   pool.untrackedVolumeUSD = pool.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   pool.feesUSD = pool.feesUSD.plus(feesUSD)
-  pool.untrackedFeesUSD = pool.untrackedFeesUSD.plus(untrackedFees)
   pool.txCount = pool.txCount.plus(ONE_BI)
 
   // Update the pool with the new active liquidity, price, and tick.
   pool.liquidity = event.params.liquidity
-  pool.tick = BigInt.fromI32(event.params.tick as i32)
+  let currentTick = BigInt.fromI32(event.params.tick as i32)
+  pool.tick = currentTick
   pool.sqrtPrice = event.params.price
-  pool.totalValueLockedToken0 = pool.totalValueLockedToken0.plus(amount0)
-  pool.totalValueLockedToken1 = pool.totalValueLockedToken1.plus(amount1)
+  pool.totalValueLockedToken0 = pool.totalValueLockedToken0.plus(amount0_)
+  pool.totalValueLockedToken1 = pool.totalValueLockedToken1.plus(amount1_)
+
+  // Update eternal farming active liquidity if tick changed
+  if (oldTick === null || !oldTick.equals(currentTick)) {
+    updateEternalFarmingActiveLiquidity(pool.id, oldTick, currentTick)
+  }
 
   // update token0 data
   token0.volume = token0.volume.plus(amount0Abs)
-  token0.totalValueLocked = token0.totalValueLocked.plus(amount0)
+  token0.totalValueLocked = token0.totalValueLocked.plus(amount0_)
   token0.volumeUSD = token0.volumeUSD.plus(amountTotalUSDTracked)
   token0.untrackedVolumeUSD = token0.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   token0.feesUSD = token0.feesUSD.plus(feesUSD)
@@ -453,15 +496,47 @@ export function handleSwap(event: SwapEvent): void {
 
   // update token1 data
   token1.volume = token1.volume.plus(amount1Abs)
-  token1.totalValueLocked = token1.totalValueLocked.plus(amount1)
+  token1.totalValueLocked = token1.totalValueLocked.plus(amount1_)
   token1.volumeUSD = token1.volumeUSD.plus(amountTotalUSDTracked)
   token1.untrackedVolumeUSD = token1.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   token1.feesUSD = token1.feesUSD.plus(feesUSD)
   token1.txCount = token1.txCount.plus(ONE_BI)
 
-  // updated pool ratess
+  // NEW: Market updates section
+  let market0_swap = Market.load(token0.market)
+  if (market0_swap) {
+    market0_swap.volume = market0_swap.volume.plus(amount0Abs)
+    market0_swap.volumeUSD = market0_swap.volumeUSD.plus(amount0USD)
+    market0_swap.untrackedVolumeUSD = market0_swap.untrackedVolumeUSD.plus(amount0USD)
 
+    market0_swap.totalValueLocked = market0_swap.totalValueLocked.plus(amount0_)
+    market0_swap.totalValueLockedUSD = market0_swap.totalValueLockedUSD.plus(amount0USD)
+    market0_swap.totalValueLockedUSDUntracked = market0_swap.totalValueLockedUSDUntracked.plus(amount0USD)
+  }
 
+  let market1_swap = Market.load(token1.market)
+  if (market1_swap) {
+    if (market0_swap !== null && market1_swap.id == market0_swap.id) {
+      market0_swap.volume = market0_swap.volume.plus(amount1Abs)
+      market0_swap.volumeUSD = market0_swap.volumeUSD.plus(amount1USD)
+      market0_swap.untrackedVolumeUSD = market0_swap.untrackedVolumeUSD.plus(amount1USD)
+
+      market0_swap.totalValueLocked = market0_swap.totalValueLocked.plus(amount1_)
+      market0_swap.totalValueLockedUSD = market0_swap.totalValueLockedUSD.plus(amount1USD)
+      market0_swap.totalValueLockedUSDUntracked = market0_swap.totalValueLockedUSDUntracked.plus(amount1USD)
+    } else {
+      market1_swap.volume = market1_swap.volume.plus(amount1Abs)
+      market1_swap.volumeUSD = market1_swap.volumeUSD.plus(amount1USD)
+      market1_swap.untrackedVolumeUSD = market1_swap.untrackedVolumeUSD.plus(amount1USD)
+
+      market1_swap.totalValueLocked = market1_swap.totalValueLocked.plus(amount1_)
+      market1_swap.totalValueLockedUSD = market1_swap.totalValueLockedUSD.plus(amount1USD)
+      market1_swap.totalValueLockedUSDUntracked = market1_swap.totalValueLockedUSDUntracked.plus(amount1USD)
+    }
+  }
+  // END NEW: Market updates section
+
+  // updated pool rates
   let prices = priceToTokenPrices(pool.sqrtPrice, token0 as Token, token1 as Token)
   pool.token0Price = prices[0]
   pool.token1Price = prices[1]
@@ -471,7 +546,6 @@ export function handleSwap(event: SwapEvent): void {
     pool.token0Price = prices[1]
     pool.token1Price = prices[0]
   }
-
 
   pool.save()
 
@@ -493,12 +567,6 @@ export function handleSwap(event: SwapEvent): void {
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
   factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
 
-  // seer
-  if (token0.isSeer || token1.isSeer) {
-    factory.totalSeerValueLockedMatic = factory.totalSeerValueLockedMatic.plus(pool.totalValueLockedMatic)
-    factory.totalSeerValueLockedUSD = factory.totalSeerValueLockedMatic.times(bundle.maticPriceUSD)
-  }
-
   token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic).times(bundle.maticPriceUSD)
   token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic).times(bundle.maticPriceUSD)
 
@@ -514,12 +582,11 @@ export function handleSwap(event: SwapEvent): void {
   swap.origin = event.transaction.from
   swap.liquidity = event.params.liquidity
   swap.recipient = event.params.recipient
-  swap.amount0 = amount0
-  swap.amount1 = amount1
+  swap.amount0 = amount0_
+  swap.amount1 = amount1_
   swap.amountUSD = amountTotalUSDTracked
   swap.tick = BigInt.fromI32(event.params.tick as i32)
   swap.price = event.params.price
-
 
   // update fee growth
   let poolContract = PoolABI.bind(event.address)
@@ -537,14 +604,14 @@ export function handleSwap(event: SwapEvent): void {
   let token0HourData = updateTokenHourData(token0 as Token, event)
   let token1HourData = updateTokenHourData(token1 as Token, event)
 
-  if (amount0.lt(ZERO_BD)) {
-    pool.feesToken1 = pool.feesToken1.plus(amount1.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
-    poolDayData.feesToken1 = poolDayData.feesToken1.plus(amount1.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
+  if (amount0_.lt(ZERO_BD)) {
+    pool.feesToken1 = pool.feesToken1.plus(amount1_.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
+    poolDayData.feesToken1 = poolDayData.feesToken1.plus(amount1_.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
   }
 
-  if (amount1.lt(ZERO_BD)) {
-    pool.feesToken0 = pool.feesToken0.plus(amount0.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
-    poolDayData.feesToken0 = poolDayData.feesToken0.plus(amount0.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
+  if (amount1_.lt(ZERO_BD)) {
+    pool.feesToken0 = pool.feesToken0.plus(amount0_.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
+    poolDayData.feesToken0 = poolDayData.feesToken0.plus(amount0_.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000')))
   }
 
   // update volume metrics
@@ -558,7 +625,6 @@ export function handleSwap(event: SwapEvent): void {
   poolDayData.volumeToken1 = poolDayData.volumeToken1.plus(amount1Abs)
   poolDayData.feesUSD = poolDayData.feesUSD.plus(feesUSD)
 
-
   poolHourData.untrackedVolumeUSD = poolHourData.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   poolHourData.volumeUSD = poolHourData.volumeUSD.plus(amountTotalUSDTracked)
   poolHourData.volumeToken0 = poolHourData.volumeToken0.plus(amount0Abs)
@@ -567,22 +633,22 @@ export function handleSwap(event: SwapEvent): void {
 
   token0DayData.volume = token0DayData.volume.plus(amount0Abs)
   token0DayData.volumeUSD = token0DayData.volumeUSD.plus(amountTotalUSDTracked)
-  token0DayData.untrackedVolumeUSD = token0DayData.untrackedVolumeUSD.plus(amountTotalUSDTracked)
+  token0DayData.untrackedVolumeUSD = token0DayData.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   token0DayData.feesUSD = token0DayData.feesUSD.plus(feesUSD)
 
   token0HourData.volume = token0HourData.volume.plus(amount0Abs)
   token0HourData.volumeUSD = token0HourData.volumeUSD.plus(amountTotalUSDTracked)
-  token0HourData.untrackedVolumeUSD = token0HourData.untrackedVolumeUSD.plus(amountTotalUSDTracked)
+  token0HourData.untrackedVolumeUSD = token0HourData.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   token0HourData.feesUSD = token0HourData.feesUSD.plus(feesUSD)
 
   token1DayData.volume = token1DayData.volume.plus(amount1Abs)
   token1DayData.volumeUSD = token1DayData.volumeUSD.plus(amountTotalUSDTracked)
-  token1DayData.untrackedVolumeUSD = token1DayData.untrackedVolumeUSD.plus(amountTotalUSDTracked)
+  token1DayData.untrackedVolumeUSD = token1DayData.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   token1DayData.feesUSD = token1DayData.feesUSD.plus(feesUSD)
 
   token1HourData.volume = token1HourData.volume.plus(amount1Abs)
   token1HourData.volumeUSD = token1HourData.volumeUSD.plus(amountTotalUSDTracked)
-  token1HourData.untrackedVolumeUSD = token1HourData.untrackedVolumeUSD.plus(amountTotalUSDTracked)
+  token1HourData.untrackedVolumeUSD = token1HourData.untrackedVolumeUSD.plus(amountTotalUSDUntracked)
   token1HourData.feesUSD = token1HourData.feesUSD.plus(feesUSD)
 
   swap.save()
@@ -597,11 +663,14 @@ export function handleSwap(event: SwapEvent): void {
   token1.save()
 
   // Update inner vars of current or crossed ticks
-  let newTick = pool.tick
+  let newTick = pool.tick!
   let modulo = newTick.mod(TICK_SPACING)
   if (modulo.equals(ZERO_BI)) {
     // Current tick is initialized and needs to be updated
     loadTickUpdateFeeVarsAndSave(newTick.toI32(), event)
+  }
+  if (oldTick === null) {
+    return;
   }
 
   let numIters = oldTick
@@ -626,6 +695,23 @@ export function handleSwap(event: SwapEvent): void {
       loadTickUpdateFeeVarsAndSave(i.toI32(), event)
     }
   }
+
+  // NEW: Market Day/Hour Data updates (after potential market entity updates)
+  if (market0_swap) {
+    market0_swap.save() // Save market0_swap before updating its interval data
+    updateMarketDayData(market0_swap, event)
+    updateMarketHourData(market0_swap, event)
+  }
+  if (market1_swap) {
+    // If market1_swap is distinct from market0_swap, save and update its interval data
+    if (market0_swap === null || market1_swap.id != market0_swap.id) {
+      market1_swap.save() // Save market1_swap before updating its interval data
+      updateMarketDayData(market1_swap, event)
+      updateMarketHourData(market1_swap, event)
+    }
+    // If market1_swap was the same as market0_swap, market0_swap (which is the same entity) was already saved and its interval data updated.
+  }
+  // END NEW: Market Day/Hour Data updates
 }
 
 export function handleSetCommunityFee(event: CommunityFee): void {

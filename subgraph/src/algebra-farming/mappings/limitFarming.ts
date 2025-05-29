@@ -52,8 +52,8 @@ export function handleIncentiveCreated(event: LimitFarmingCreated): void {
   entity.startTime = event.params.startTime;
   entity.endTime = event.params.endTime;
   entity.minRangeLength = BigInt.fromI32(event.params.minimalAllowedPositionWidth)
-  entity.reward += event.params.reward;
-  entity.bonusReward += event.params.bonusReward;
+  entity.reward = entity.reward.plus(event.params.reward);
+  entity.bonusReward = entity.bonusReward.plus(event.params.bonusReward);
   entity.createdAtTimestamp = event.block.timestamp;
   entity.tokenAmountForTier1 = event.params.tiers.tokenAmountForTier1
   entity.tokenAmountForTier2 = event.params.tiers.tokenAmountForTier2
@@ -72,7 +72,7 @@ export function handleIncentiveCreated(event: LimitFarmingCreated): void {
 export function handleTokenStaked(event: FarmEntered): void {
   let entity = Deposit.load(event.params.tokenId.toString());
   if (entity != null) {
-    entity.limitFarming = event.params.incentiveId;
+    entity.limitFarming = event.params.incentiveId.toHexString();
     entity.tokensLockedLimit = event.params.tokensLocked;
     entity.tierLimit = getTier(event.params.tokensLocked, event.params.incentiveId.toHexString())
     entity.save();
@@ -159,8 +159,8 @@ export function handleDeactivate(event: IncentiveDeactivated): void {
 export function handleRewardsAdded(event: RewardsAdded): void {
   let incentive = LimitFarming.load(event.params.incentiveId.toHexString())
   if (incentive) {
-    incentive.bonusReward += event.params.bonusRewardAmount
-    incentive.reward += event.params.rewardAmount
+    incentive.bonusReward = incentive.bonusReward.plus(event.params.bonusRewardAmount);
+    incentive.reward = incentive.reward.plus(event.params.rewardAmount);
     incentive.save()
   }
 }
@@ -168,8 +168,8 @@ export function handleRewardsAdded(event: RewardsAdded): void {
 export function handleRewardAmountsDecreased(event: RewardAmountsDecreased): void {
   let incentive = LimitFarming.load(event.params.incentiveId.toHexString())
   if (incentive) {
-    incentive.bonusReward -= event.params.bonusReward
-    incentive.reward -= event.params.reward
+    incentive.bonusReward = incentive.bonusReward.minus(event.params.bonusReward);
+    incentive.reward = incentive.reward.minus(event.params.reward);
     incentive.save()
   }
 }

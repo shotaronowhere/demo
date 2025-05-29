@@ -7,29 +7,19 @@ import { exponentToBigDecimal, safeDiv } from '../utils/index'
 import { Sdai } from '../../../generated/Factory/Sdai'
 const WMatic_ADDRESS = '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d'
 const sdai = '0xaf204776c7245bf4147c2612bf6e5972ee483701'
-const USDC_WMatic_03_POOL = '0x308c5b91f63307439fdb51a9fa4dfc979e2ed6b0'
 
 // token where amounts should contribute to tracked volume and liquidity
 // usually tokens that many tokens are paired with 
-// s
+// sdai and seer tokens
 export let WHITELIST_TOKENS: string[] = [
-  '0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1', // WETH
-  '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d', // WXDAI
-  '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb', // GNO 
-  '0x8e5bBbb09Ed1ebdE8674Cda39A0c169401db4252', // WBTC
-  '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83', // USDC
-  '0x1e2c4fb7ede391d116e6b41cd0608260e8801d59', // bCSPX
-  '0xaf204776c7245bf4147c2612bf6e5972ee483701'  // sdai
+  sdai
 ]
 
 let MINIMUM_Matic_LOCKED = BigDecimal.fromString('0')
 
 let Q192 = Math.pow(2, 192)
 
-let STABLE_COINS: string[] = [
-  '0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83', // USDC
-  '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d', // wxdai
-]
+let STABLE_COINS: string[] = []
 
 
 export function priceToTokenPrices(price: BigInt, token0: Token, token1: Token): BigDecimal[] {
@@ -54,9 +44,6 @@ export function getEthPriceInUSD(): BigDecimal {
  * @todo update to be derived Matic (add stablecoin estimates)
  **/
 export function findEthPerToken(token: Token, block: ethereum.Block): BigDecimal {
-  if (token.id == WMatic_ADDRESS) {
-    return ONE_BD
-  }
   if (token.id == sdai) {
     if (block.number.lt(BigInt.fromString('30195209'))) {
       return BigDecimal.fromString('1')
@@ -68,6 +55,7 @@ export function findEthPerToken(token: Token, block: ethereum.Block): BigDecimal
     // convert to decimal
     return price.toBigDecimal().div(BigDecimal.fromString('1000000000000000000'))
   }
+
   let whiteList = token.whitelistPools
   // for now just take USD from pool with greatest TVL
   // need to update this to actually detect best rate based on liquidity distribution
@@ -128,18 +116,13 @@ export function getTrackedAmountUSD(
   let price0USD = token0.derivedMatic.times(bundle.maticPriceUSD)
   let price1USD = token1.derivedMatic.times(bundle.maticPriceUSD)
 
-  // both are whitelist tokens, return sum of both amounts
-  if (WHITELIST_TOKENS.includes(token0.id) && WHITELIST_TOKENS.includes(token1.id)) {
-    return tokenAmount0.times(price0USD).plus(tokenAmount1.times(price1USD))
-  }
-
   // take double value of the whitelisted token amount
-  if (WHITELIST_TOKENS.includes(token0.id) && !WHITELIST_TOKENS.includes(token1.id)) {
+  if (sdai == token0.id) {
     return tokenAmount0.times(price0USD).times(BigDecimal.fromString('2'))
   }
 
   // take double value of the whitelisted token amount
-  if (!WHITELIST_TOKENS.includes(token0.id) && WHITELIST_TOKENS.includes(token1.id)) {
+  if (sdai == token1.id) {
     return tokenAmount1.times(price1USD).times(BigDecimal.fromString('2'))
   }
 

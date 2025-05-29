@@ -89,68 +89,37 @@ export function handleNewMarket(event: NewMarketEvent): void {
     Address.fromString(event.params.market.toHexString())
   );
 
-  let token0 = Token.load(data.wrappedTokens[0].toHexString())
-  let token1 = Token.load(data.wrappedTokens[1].toHexString())
 
-
-  // fetch info if null
-  if (token0 === null) {
-    token0 = new Token(data.wrappedTokens[0].toHexString())
-    token0.symbol = fetchTokenSymbol(data.wrappedTokens[0])
-    token0.name = fetchTokenName(data.wrappedTokens[0])
-    token0.totalSupply = fetchTokenTotalSupply(data.wrappedTokens[0])
-    let decimals = fetchTokenDecimals(data.wrappedTokens[0])
-
-    // bail if we couldn't figure out the decimals
-    if (decimals === null) {
-      log.debug('mybug the decimal on token 0 was null', [])
-      return
+  // create tokens
+  for (let i = 0; i < data.wrappedTokens.length; i++) {
+    let token = Token.load(data.wrappedTokens[i].toHexString())
+    if (token === null) {
+      token = new Token(data.wrappedTokens[i].toHexString())
+      token.symbol = fetchTokenSymbol(data.wrappedTokens[i])
+      token.name = fetchTokenName(data.wrappedTokens[i])
+      token.totalSupply = fetchTokenTotalSupply(data.wrappedTokens[i])
+      let decimals = fetchTokenDecimals(data.wrappedTokens[i])
+      if (decimals === null) {
+        log.debug('mybug the decimal on token 0 was null', [])
+        return
+      }
+      token.decimals = decimals
+      token.derivedMatic = ZERO_BD
+      token.volume = ZERO_BD
+      token.volumeUSD = ZERO_BD
+      token.untrackedVolumeUSD = ZERO_BD
+      token.feesUSD = ZERO_BD
+      token.totalValueLocked = ZERO_BD
+      token.totalValueLockedUSD = ZERO_BD
+      token.totalValueLockedUSDUntracked = ZERO_BD
+      token.txCount = ZERO_BI
+      token.poolCount = ZERO_BI
+      token.whitelistPools = []
+      token.isSeer = true
+      token.market = event.params.market.toHexString()
+      token.save()
     }
-
-    token0.decimals = decimals
-    token0.derivedMatic = ZERO_BD
-    token0.volume = ZERO_BD
-    token0.volumeUSD = ZERO_BD
-    token0.feesUSD = ZERO_BD
-    token0.untrackedVolumeUSD = ZERO_BD
-    token0.totalValueLocked = ZERO_BD
-    token0.totalValueLockedUSD = ZERO_BD
-    token0.totalValueLockedUSDUntracked = ZERO_BD
-    token0.txCount = ZERO_BI
-    token0.poolCount = ZERO_BI
-    token0.whitelistPools = []
-    token0.isSeer = true
   }
-
-  if (token1 === null) {
-    token1 = new Token(data.wrappedTokens[1].toHexString())
-    token1.symbol = fetchTokenSymbol(data.wrappedTokens[1])
-    token1.name = fetchTokenName(data.wrappedTokens[1])
-    token1.totalSupply = fetchTokenTotalSupply(data.wrappedTokens[1])
-    let decimals = fetchTokenDecimals(data.wrappedTokens[1])
-    // bail if we couldn't figure out the decimals
-    if (decimals === null) {
-      log.debug('mybug the decimal on token 0 was null', [])
-      return
-    }
-    token1.decimals = decimals
-    token1.derivedMatic = ZERO_BD
-    token1.volume = ZERO_BD
-    token1.volumeUSD = ZERO_BD
-    token1.untrackedVolumeUSD = ZERO_BD
-    token1.feesUSD = ZERO_BD
-    token1.totalValueLocked = ZERO_BD
-    token1.totalValueLockedUSD = ZERO_BD
-    token1.totalValueLockedUSDUntracked = ZERO_BD
-    token1.txCount = ZERO_BI
-    token1.poolCount = ZERO_BI
-    token1.whitelistPools = []
-    token1.isSeer = true
-  }
-
-  token0.save()
-  token1.save()
-
 
   processMarket(
     event,
@@ -245,6 +214,12 @@ export function processMarket(
   market.finalizeTs = DEFAULT_FINALIZE_TS;
   market.questionsInArbitration = BigInt.fromI32(0);
   market.hasAnswers = false;
+  market.totalValueLockedUSD = ZERO_BD
+  market.totalValueLocked = ZERO_BD
+  market.totalValueLockedUSDUntracked = ZERO_BD
+  market.volume = ZERO_BD
+  market.volumeUSD = ZERO_BD
+  market.untrackedVolumeUSD = ZERO_BD
   market.index = getNextMarketIndex();
 
   for (let i = 0; i < data.questionsIds.length; i++) {
