@@ -36,6 +36,10 @@
       "address": "0x5aAF9E23A11440F8C1Ad6D2E2e5109C7e52CC672",
       "startBlock": 36336124
     },
+    "LightGTCRFactory": {
+      "address": "0x08e58Bc26CFB0d346bABD253A1799866F269805a",
+      "startBlock": 36336124
+    },
     "Realitio_v2_1_ArbitratorWithAppeals": {
       "address": "0x0000000000000000000000000000000000000000",
       "startBlock": 36404701

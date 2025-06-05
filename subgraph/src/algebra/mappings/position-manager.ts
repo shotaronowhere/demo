@@ -6,7 +6,7 @@ import {
   NonfungiblePositionManager,
   Transfer
 } from '../../../generated/NonfungiblePositionManager/NonfungiblePositionManager'
-import { Position, Deposit, PositionSnapshot, Token } from '../../../generated/schema'
+import { Position, Deposit, PositionSnapshot, Token, Pool } from '../../../generated/schema'
 import { ADDRESS_ZERO, factoryContract, ZERO_BD, ZERO_BI, pools_list } from '../utils/constants'
 import { Address, BigInt, ethereum } from '@graphprotocol/graph-ts'
 import { convertTokenToDecimal, loadTransaction } from '../utils'
@@ -143,7 +143,6 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
   position.depositedToken0 = position.depositedToken0.plus(amount0)
   position.depositedToken1 = position.depositedToken1.plus(amount1)
 
-
   // recalculatePosition(position)
 
 
@@ -160,6 +159,13 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
     entity = new Deposit(event.params.tokenId.toString());
     entity.owner = event.transaction.from;
     entity.pool = event.params.pool.toHexString();
+    // load pool and read markets
+    let pool = Pool.load(event.params.pool.toHexString())
+    if (pool == null) {
+      return
+    }
+    entity.market0 = pool.market0
+    entity.market1 = pool.market1
     entity.onFarmingCenter = false;
     entity.liquidity = BigInt.fromString("0")
     entity.rangeLength = getRangeLength(event.params.tokenId, event.address)
@@ -283,15 +289,8 @@ export function handleTransfer(event: Transfer): void {
   let token0 = Token.load(position.token0)
   let token1 = Token.load(position.token1)
 
-  // atleast 1 token must be a seer token
-  if (token0 === null) {
-    if (token1 === null) {
-      return;
-    } else {
-      if (!token1.isSeer) {
-        return;
-      }
-    }
+  if (token0 === null || token1 === null) {
+    return
   }
 
 

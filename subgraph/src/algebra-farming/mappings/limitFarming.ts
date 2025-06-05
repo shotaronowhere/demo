@@ -1,4 +1,4 @@
-import { ethereum, crypto, BigInt } from '@graphprotocol/graph-ts';
+import { ethereum, crypto, BigInt, Address } from '@graphprotocol/graph-ts';
 import {
   LimitFarmingCreated,
   FarmEntered,
@@ -10,6 +10,7 @@ import {
 } from '../../../generated/LimitFarming/LimitFarming';
 import { LimitFarming, Deposit, Reward, Pool } from '../../../generated/schema';
 import { createTokenEntity } from '../utils/token';
+import { ADDRESS_ZERO } from '../../algebra/utils/constants';
 
 
 
@@ -28,9 +29,9 @@ export function handleIncentiveCreated(event: LimitFarmingCreated): void {
     return;
   }
 
-  createTokenEntity(event.params.rewardToken)
-  createTokenEntity(event.params.bonusRewardToken)
-  createTokenEntity(event.params.multiplierToken)
+  createTokenEntity(event.params.rewardToken, false, Address.fromString(ADDRESS_ZERO))
+  createTokenEntity(event.params.bonusRewardToken, false, Address.fromString(ADDRESS_ZERO))
+  createTokenEntity(event.params.multiplierToken, false, Address.fromString(ADDRESS_ZERO))
 
   let _incentiveTuple = changetype<ethereum.Tuple>(incentiveIdTuple);
 

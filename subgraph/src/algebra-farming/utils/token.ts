@@ -85,38 +85,39 @@ export function fetchTokenDecimals(tokenAddress: Address): BigInt {
   return decimalValue
 }
 
-export function createTokenEntity(tokenAddress: Address): void {
-
+export function createTokenEntity(tokenAddress: Address, isSeer: boolean, market: Address): boolean {
+  // check if token already exists
   let token = Token.load(tokenAddress.toHexString())
-
-  if (token == null) {
-    token = new Token(tokenAddress.toHexString())
-    token.name = fetchTokenName(tokenAddress)
-    let decimals = fetchTokenDecimals(tokenAddress)
-    // bail if we couldn't figure out the decimals
-    if (decimals === null) {
-      log.debug('mybug the decimal on token 0 was null', [])
-      return
-    }
-    token.decimals = decimals
-    token.symbol = fetchTokenSymbol(tokenAddress)
-    token.totalSupply = fetchTokenTotalSupply(tokenAddress)
-    token.derivedMatic = ZERO_BD
-    token.volume = ZERO_BD
-    token.volumeUSD = ZERO_BD
-    token.feesUSD = ZERO_BD
-    token.untrackedVolumeUSD = ZERO_BD
-    token.totalValueLocked = ZERO_BD
-    token.totalValueLockedUSD = ZERO_BD
-    token.totalValueLockedUSDUntracked = ZERO_BD
-    token.txCount = ZERO_BI
-    token.poolCount = ZERO_BI
-    token.whitelistPools = []
-    token.isSeer = false
-    token.market = ADDRESS_ZERO
-    token.save()
+  if (token != null) {
+    return true
   }
 
-
-
+  token = new Token(tokenAddress.toHexString())
+  token.name = fetchTokenName(tokenAddress)
+  let decimals = fetchTokenDecimals(tokenAddress)
+  // bail if we couldn't figure out the decimals
+  if (decimals === null) {
+    log.debug('mybug the decimal on token 0 was null', [])
+    return false
+  }
+  token.decimals = decimals
+  token.symbol = fetchTokenSymbol(tokenAddress)
+  token.totalSupply = fetchTokenTotalSupply(tokenAddress)
+  token.derivedMatic = ZERO_BD
+  token.volume = ZERO_BD
+  token.volumeUSD = ZERO_BD
+  token.feesUSD = ZERO_BD
+  token.untrackedVolumeUSD = ZERO_BD
+  token.totalValueLocked = ZERO_BD
+  token.totalValueLockedUSD = ZERO_BD
+  token.totalValueLockedUSDUntracked = ZERO_BD
+  token.txCount = ZERO_BI
+  token.poolCount = ZERO_BI
+  token.whitelistPools = []
+  token.isSeer = isSeer
+  if (market.toHexString().localeCompare(ADDRESS_ZERO) !== 0) {
+    token.market = market.toHexString()
+  }
+  token.save()
+  return true
 }

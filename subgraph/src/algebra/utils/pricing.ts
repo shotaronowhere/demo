@@ -1,18 +1,19 @@
 /* eslint-disable prefer-const */
 import { ONE_BD, ZERO_BD, ZERO_BI } from './constants'
-import { Bundle, Pool, Token } from '../../../generated/schema'
+import { Pool, Token } from '../../../generated/schema'
 import { Address, BigDecimal, BigInt, ethereum } from '@graphprotocol/graph-ts'
 import { exponentToBigDecimal, safeDiv } from '../utils/index'
 // import sdai abi generated
 import { Sdai } from '../../../generated/Factory/Sdai'
-const WMatic_ADDRESS = '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d'
+const WMatic_ADDRESS = '0xe91d153e0b41518a2ce8dd3d7944fa863463a97d'
 const sdai = '0xaf204776c7245bf4147c2612bf6e5972ee483701'
 
 // token where amounts should contribute to tracked volume and liquidity
 // usually tokens that many tokens are paired with 
 // sdai and seer tokens
 export let WHITELIST_TOKENS: string[] = [
-  sdai
+  sdai,
+  WMatic_ADDRESS
 ]
 
 let MINIMUM_Matic_LOCKED = BigDecimal.fromString('0')
@@ -61,12 +62,11 @@ export function findEthPerToken(token: Token, block: ethereum.Block): BigDecimal
   // need to update this to actually detect best rate based on liquidity distribution
   let largestLiquidityMatic = ZERO_BD
   let priceSoFar = ZERO_BD
-  let bundle = Bundle.load('1')
 
   // hardcoded fix for incorrect rates
   // if whitelist includes token - get the safe price
   if (STABLE_COINS.includes(token.id)) {
-    priceSoFar = safeDiv(ONE_BD, bundle!.maticPriceUSD)
+    priceSoFar = safeDiv(ONE_BD, ONE_BD)
   } else {
     for (let i = 0; i < whiteList.length; ++i) {
       let poolAddress = whiteList[i]
@@ -112,9 +112,8 @@ export function getTrackedAmountUSD(
   tokenAmount1: BigDecimal,
   token1: Token
 ): BigDecimal {
-  let bundle = Bundle.load('1')!
-  let price0USD = token0.derivedMatic.times(bundle.maticPriceUSD)
-  let price1USD = token1.derivedMatic.times(bundle.maticPriceUSD)
+  let price0USD = token0.derivedMatic
+  let price1USD = token1.derivedMatic
 
   // take double value of the whitelisted token amount
   if (sdai == token0.id) {

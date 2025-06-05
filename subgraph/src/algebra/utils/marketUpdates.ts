@@ -16,12 +16,10 @@ export function updateMarketDayData(market: Market, event: ethereum.Event): Mark
         marketDayData.volume = ZERO_BD
         marketDayData.volumeUSD = ZERO_BD
         marketDayData.untrackedVolumeUSD = ZERO_BD
-        marketDayData.totalValueLocked = ZERO_BD
         marketDayData.totalValueLockedUSD = ZERO_BD
         marketDayData.totalValueLockedUSDUntracked = ZERO_BD
     }
-    // Update TVL an Volume from the market entity itself as it's cumulative
-    marketDayData.totalValueLocked = market.totalValueLocked
+    // Update TVL and Volume from the market entity itself as it's cumulative
     marketDayData.totalValueLockedUSD = market.totalValueLockedUSD
     marketDayData.totalValueLockedUSDUntracked = market.totalValueLockedUSDUntracked
     marketDayData.volume = market.volume
@@ -46,12 +44,10 @@ export function updateMarketHourData(market: Market, event: ethereum.Event): Mar
         marketHourData.volume = ZERO_BD
         marketHourData.volumeUSD = ZERO_BD
         marketHourData.untrackedVolumeUSD = ZERO_BD
-        marketHourData.totalValueLocked = ZERO_BD
         marketHourData.totalValueLockedUSD = ZERO_BD
         marketHourData.totalValueLockedUSDUntracked = ZERO_BD
     }
-    // Update TVL an Volume from the market entity itself as it's cumulative
-    marketHourData.totalValueLocked = market.totalValueLocked
+    // Update TVL and Volume from the market entity itself as it's cumulative
     marketHourData.totalValueLockedUSD = market.totalValueLockedUSD
     marketHourData.totalValueLockedUSDUntracked = market.totalValueLockedUSDUntracked
     marketHourData.volume = market.volume

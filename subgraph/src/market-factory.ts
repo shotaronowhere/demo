@@ -6,8 +6,7 @@ import {
   ethereum,
   log,
 } from "@graphprotocol/graph-ts";
-import { fetchTokenSymbol, fetchTokenName, fetchTokenTotalSupply, fetchTokenDecimals } from './algebra/utils/token'
-import { ZERO_BI, ZERO_BD } from './algebra/utils/constants'
+import { ADDRESS_ZERO, ZERO_BD } from './algebra/utils/constants'
 import {
   MarketFactory,
   NewMarket as NewMarketEvent,
@@ -22,6 +21,7 @@ import {
   Token,
 } from "../generated/schema";
 import { DEFAULT_FINALIZE_TS } from "./reality";
+import { createTokenEntity } from "./algebra-farming/utils/token";
 
 function getMarketViewAddress(network: string): string {
   if (network == "sepolia") {
@@ -94,32 +94,14 @@ export function handleNewMarket(event: NewMarketEvent): void {
   for (let i = 0; i < data.wrappedTokens.length; i++) {
     let token = Token.load(data.wrappedTokens[i].toHexString())
     if (token === null) {
-      token = new Token(data.wrappedTokens[i].toHexString())
-      token.symbol = fetchTokenSymbol(data.wrappedTokens[i])
-      token.name = fetchTokenName(data.wrappedTokens[i])
-      token.totalSupply = fetchTokenTotalSupply(data.wrappedTokens[i])
-      let decimals = fetchTokenDecimals(data.wrappedTokens[i])
-      if (decimals === null) {
-        log.debug('mybug the decimal on token 0 was null', [])
+      let success = createTokenEntity(data.wrappedTokens[i], true, event.params.market)
+      if (!success) {
+        log.debug('mybug the token was null', [])
         return
       }
-      token.decimals = decimals
-      token.derivedMatic = ZERO_BD
-      token.volume = ZERO_BD
-      token.volumeUSD = ZERO_BD
-      token.untrackedVolumeUSD = ZERO_BD
-      token.feesUSD = ZERO_BD
-      token.totalValueLocked = ZERO_BD
-      token.totalValueLockedUSD = ZERO_BD
-      token.totalValueLockedUSDUntracked = ZERO_BD
-      token.txCount = ZERO_BI
-      token.poolCount = ZERO_BI
-      token.whitelistPools = []
-      token.isSeer = true
-      token.market = event.params.market.toHexString()
-      token.save()
     }
   }
+
 
   processMarket(
     event,
@@ -160,15 +142,15 @@ function getCollateralToken(
   parentMarket: Address,
   parentOutcome: BigInt,
   collateralToken: Address
-): Bytes {
+): string {
   if (parentMarket.equals(Address.zero())) {
-    return collateralToken;
+    return collateralToken.toHexString();
   }
 
   const market = Market.load(parentMarket.toHexString());
 
   if (!market) {
-    return collateralToken;
+    return collateralToken.toHexString();
   }
 
   return market.wrappedTokens[parentOutcome.toI32()];
@@ -194,15 +176,42 @@ export function processMarket(
   market.upperBound = data.upperBound;
   market.parentCollectionId = data.parentCollectionId;
   market.parentOutcome = data.parentOutcome;
-  market.wrappedTokens = changetype<Bytes[]>(data.wrappedTokens);
+  market.wrappedTokens = data.wrappedTokens.map<string>((token) => token.toHexString());
   market.parentMarket = data.parentMarket.toHexString();
   market.collateralToken = getCollateralToken(
     data.parentMarket,
     data.parentOutcome,
     collateralToken
   );
-  market.collateralToken1 = data.collateralToken1;
-  market.collateralToken2 = data.collateralToken2;
+  market.collateralToken1 = data.collateralToken1.toHexString();
+  market.collateralToken2 = data.collateralToken2.toHexString();
+  let collateralTokenEntity = Token.load(market.collateralToken)
+  if (collateralTokenEntity === null) {
+    let success = createTokenEntity(Address.fromString(market.collateralToken), false, Address.fromString(ADDRESS_ZERO))
+    if (!success) {
+      log.debug('mybug the token was null', [])
+      return
+    }
+  }
+  // create tokens for collateral tokens if they don't exist already exist (check first)
+  let collateralToken1 = Token.load(data.collateralToken1.toHexString())
+  if (collateralToken1 === null) {
+    let success = createTokenEntity(data.collateralToken1, false, Address.fromString(ADDRESS_ZERO))
+    if (!success) {
+      log.debug('mybug the token was null', [])
+      return
+    }
+  }
+
+  let collateralToken2 = Token.load(data.collateralToken2.toHexString())
+  if (collateralToken2 === null) {
+    let success = createTokenEntity(data.collateralToken2, false, Address.fromString(ADDRESS_ZERO))
+    if (!success) {
+      log.debug('mybug the token was null', [])
+      return
+    }
+  }
+
   market.conditionId = data.conditionId;
   market.ctfCondition = condition.id;
   market.questionId = data.questionId;
@@ -215,7 +224,6 @@ export function processMarket(
   market.questionsInArbitration = BigInt.fromI32(0);
   market.hasAnswers = false;
   market.totalValueLockedUSD = ZERO_BD
-  market.totalValueLocked = ZERO_BD
   market.totalValueLockedUSDUntracked = ZERO_BD
   market.volume = ZERO_BD
   market.volumeUSD = ZERO_BD
@@ -248,6 +256,7 @@ export function processMarket(
     );
     marketQuestion.market = market.id;
     marketQuestion.question = question.id;
+    marketQuestion.baseQuestion = question.id;
     marketQuestion.index = i;
     marketQuestion.save();
   }

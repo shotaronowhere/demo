@@ -2,16 +2,40 @@ specVersion: 1.0.0
 description: Combined subgraph for Algebra DEX, Farming, and Prediction Markets
 indexerHints:
   prune: never
+features:
+  - fullTextSearch
+  - ipfsOnEthereumContracts
 schema:
   file: ./schema.graphql
 dataSources:
+  - kind: ethereum/contract
+    name: LightGTCRFactory
+    network: gnosis
+    source:
+      abi: LightGTCRFactory
+      address: "0x08e58Bc26CFB0d346bABD253A1799866F269805a"
+      startBlock: 36336124
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - MetaEvidence
+        - LRegistry
+      abis:
+        - name: LightGTCRFactory
+          file: ./abis/LightGTCRFactory.json
+      eventHandlers:
+        - event: NewGTCR(indexed address)
+          handler: handleNewGTCR
+      file: ./src/LightGTCRFactoryMapping.ts
   - kind: ethereum/contract
     name: Factory
     network: gnosis
     source:
       abi: Factory
       address: "0xA0864cCA6E114013AB0e27cbd5B6f4c8947da766"
-      startBlock: 30096645
+      startBlock: 36404701
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -42,7 +66,7 @@ dataSources:
     source:
       abi: NonfungiblePositionManager
       address: "0x91fD594c46D8B01E62dBDeBed2401dde01817834"
-      startBlock: 30096660
+      startBlock: 36404701
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -81,7 +105,7 @@ dataSources:
     source:
       abi: EternalFarming
       address: "0x607BbfD4CEbd869AaD04331F8a2AD0C3C396674b"
-      startBlock: 30096668
+      startBlock: 36404701
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -95,6 +119,8 @@ dataSources:
       abis:
         - name: EternalFarming
           file: ./abis/EternalFarming.json
+        - name: EternalVirtualPool
+          file: ./abis/EternalVirtualPool.json
         - name: ERC20
           file: ./abis/ERC20.json
         - name: ERC20SymbolBytes
@@ -129,7 +155,7 @@ dataSources:
     source:
       abi: FarmingCenter
       address: "0xDe51dDF1aE7d5BBD7bF1A0e40aAA1F6C12579106"
-      startBlock: 30096672
+      startBlock: 36404701
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -156,7 +182,7 @@ dataSources:
     source:
       abi: LimitFarming
       address: "0xA01e2785d2D04cC0a09Bde9C3eA49Bf0aD7811F2"
-      startBlock: 30096667
+      startBlock: 36404701
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -377,3 +403,127 @@ templates:
           handler: handleCollect
         - event: CommunityFee(uint8,uint8)
           handler: handleSetCommunityFee
+  - kind: ethereum/contract
+    name: LightGeneralizedTCR
+    network: gnosis
+    source:
+      abi: LightGeneralizedTCR
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - LItem
+        - LItem,
+        - ItemProp,
+        - LRequest,
+        - LRound,
+        - LRegistry,
+        - MetaEvidence,
+        - Arbitrator,
+        - LContribution,
+      abis:
+        - name: LightGeneralizedTCR
+          file: ./abis/LightGeneralizedTCR.json
+        - name: IArbitrator
+          file: ./abis/IArbitrator.json
+      eventHandlers:
+        - event: NewItem(indexed bytes32,string,bool)
+          handler: handleNewItem
+        - event: RequestSubmitted(indexed bytes32,uint256)
+          handler: handleRequestSubmitted
+        - event: Dispute(indexed address,indexed uint256,uint256,uint256)
+          handler: handleRequestChallenged
+        - event: ItemStatusChange(indexed bytes32,bool)
+          handler: handleStatusUpdated
+        - event: Contribution(indexed bytes32,uint256,uint256,indexed
+            address,uint256,uint8)
+          handler: handleContribution
+        - event: RewardWithdrawn(indexed address,indexed bytes32,uint256,uint256,uint256)
+          handler: handleRewardWithdrawn
+        - event: MetaEvidence(indexed uint256,string)
+          handler: handleMetaEvidence
+        - event: Evidence(indexed address,indexed uint256,indexed address,string)
+          handler: handleEvidence
+        - event: Ruling(indexed address,indexed uint256,uint256)
+          handler: handleRuling
+        - event: ConnectedTCRSet(indexed address)
+          handler: handleConnectedTCRSet
+      file: ./src/LightGeneralizedTCRMapping.ts
+  - kind: ethereum/contract
+    name: LIArbitrator
+    network: gnosis
+    source:
+      abi: IArbitrator
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Arbitrator
+      abis:
+        - name: IArbitrator
+          file: ./abis/IArbitrator.json
+        - name: LightGeneralizedTCR
+          file: ./abis/LightGeneralizedTCR.json
+      eventHandlers:
+        - event: AppealPossible(indexed uint256,indexed address)
+          handler: handleAppealPossible
+        - event: AppealDecision(indexed uint256,indexed address)
+          handler: handleAppealDecision
+      file: ./src/LightGeneralizedTCRMapping.ts
+  - name: LGTCREvidence
+    kind: file/ipfs
+    mapping:
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/fileHandlers/LEvidenceMetadataHandler.ts
+      handler: handleLGTCREvidenceMetadata
+      entities:
+        - EvidenceMetadata
+      abis:
+        - name: LightGeneralizedTCR
+          file: ./abis/LightGeneralizedTCR.json
+    network: gnosis
+  - name: LItemMetadata
+    kind: file/ipfs
+    mapping:
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/fileHandlers/LItemMetadataHandler.ts
+      handler: handleLItemMetadata
+      entities:
+        - LItemMetadata
+        - ItemProp
+      abis:
+        - name: LightGeneralizedTCR
+          file: ./abis/LightGeneralizedTCR.json
+    network: gnosis
+  - name: LItemMetametadata
+    kind: file/ipfs
+    mapping:
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/fileHandlers/LItemMetametadataHandler.ts
+      handler: handleLItemMetametadata
+      entities:
+        - LItemMetametadata
+        - MetaItemProp
+        - Image
+      abis:
+        - name: LightGeneralizedTCR
+          file: ./abis/LightGeneralizedTCR.json
+    network: gnosis
+  - name: LRegistryMetadata
+    kind: file/ipfs
+    mapping:
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/fileHandlers/LRegistryMetadataHandler.ts
+      handler: handleLRegistryMetadata
+      entities:
+        - LRegistryMetadata
+      abis:
+        - name: LightGeneralizedTCR
+          file: ./abis/LightGeneralizedTCR.json
+    network: gnosis

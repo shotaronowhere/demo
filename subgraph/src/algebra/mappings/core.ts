@@ -1,5 +1,5 @@
 /* eslint-disable prefer-const */
-import { Bundle, Burn, Factory, Mint, Pool, Swap, Tick, PoolPosition, Token, PoolFeeData, Market } from '../../../generated/schema'
+import { Burn, Factory, Mint, Pool, Swap, Tick, PoolPosition, Token, PoolFeeData, Market } from '../../../generated/schema'
 import { Pool as PoolABI } from '../../../generated/Factory/Pool'
 import { BigDecimal, BigInt, ethereum, log } from '@graphprotocol/graph-ts'
 
@@ -42,10 +42,6 @@ export function handleInitialize(event: Initialize): void {
   let token0 = Token.load(pool.token0)!
   let token1 = Token.load(pool.token1)!
 
-  // update Matic price now that prices could have changed
-  let bundle = Bundle.load('1')!
-  bundle.maticPriceUSD = getEthPriceInUSD()
-  bundle.save()
   updatePoolDayData(event)
   updatePoolHourData(event)
   // update token prices
@@ -56,7 +52,6 @@ export function handleInitialize(event: Initialize): void {
 }
 
 export function handleMint(event: MintEvent): void {
-  let bundle = Bundle.load('1')!
   let poolAddress = event.address.toHexString()
   let pool = Pool.load(poolAddress)!
   if (pool === null) {
@@ -79,23 +74,40 @@ export function handleMint(event: MintEvent): void {
   }
 
   let amountUSD = amount0
-    .times(token0.derivedMatic.times(bundle.maticPriceUSD))
-    .plus(amount1.times(token1.derivedMatic.times(bundle.maticPriceUSD)))
+    .times(token0.derivedMatic)
+    .plus(amount1.times(token1.derivedMatic))
 
   // reset tvl aggregates until new amounts calculated
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(pool.totalValueLockedMatic)
   // update globals
   factory.txCount = factory.txCount.plus(ONE_BI)
+  // reset market tvl aggregates until new amounts calculated
+
+  // reset market tvl aggregates until new amounts calculated
+  if (token0.market !== null) {
+    let market = Market.load(token0.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.minus(pool.totalValueLockedUSD)
+      market.save()
+    }
+  }
+  if (token1.market !== null && token1.market !== token0.market) {
+    let market = Market.load(token1.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.minus(pool.totalValueLockedUSD)
+      market.save()
+    }
+  }
 
   // update token0 data
   token0.txCount = token0.txCount.plus(ONE_BI)
   token0.totalValueLocked = token0.totalValueLocked.plus(amount0)
-  token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic.times(bundle.maticPriceUSD))
+  token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic)
 
   // update token1 data
   token1.txCount = token1.txCount.plus(ONE_BI)
   token1.totalValueLocked = token1.totalValueLocked.plus(amount1)
-  token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic.times(bundle.maticPriceUSD))
+  token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic)
 
   // pool data
   pool.txCount = pool.txCount.plus(ONE_BI)
@@ -114,13 +126,34 @@ export function handleMint(event: MintEvent): void {
   pool.totalValueLockedMatic = pool.totalValueLockedToken0
     .times(token0.derivedMatic)
     .plus(pool.totalValueLockedToken1.times(token1.derivedMatic))
-  pool.totalValueLockedUSD = pool.totalValueLockedMatic.times(bundle.maticPriceUSD)
+  pool.totalValueLockedUSD = pool.totalValueLockedMatic
 
   // reset aggregates with new amounts
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
-  factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
+  factory.totalValueLockedUSD = factory.totalValueLockedMatic
 
+  // reset market tvl aggregates until new amounts calculated
 
+  // reset market tvl aggregates until new amounts calculated
+  if (token0.market !== null) {
+    let market = Market.load(token0.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.plus(pool.totalValueLockedUSD)
+      market.save()
+      updateMarketDayData(market, event)
+      updateMarketHourData(market, event)
+    }
+  }
+  if (token1.market !== null && token1.market !== token0.market) {
+    let market = Market.load(token1.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.plus(pool.totalValueLockedUSD)
+      market.save()
+      updateMarketDayData(market, event)
+      updateMarketHourData(market, event)
+
+    }
+  }
 
   let transaction = loadTransaction(event)
   let mint = new Mint(transaction.id.toString() + '#' + pool.txCount.toString())
@@ -187,47 +220,6 @@ export function handleMint(event: MintEvent): void {
   updateTokenHourData(token0 as Token, event)
   updateTokenHourData(token1 as Token, event)
 
-  // Update Market Day/Hour Data based on potentially updated Market TVL
-  let market0_mint = Market.load(token0.market)
-  if (market0_mint) {
-    let amount0USD_val = amount0.times(token0.derivedMatic.times(bundle.maticPriceUSD))
-    market0_mint.totalValueLocked = market0_mint.totalValueLocked.plus(amount0)
-    market0_mint.totalValueLockedUSD = market0_mint.totalValueLockedUSD.plus(amount0USD_val)
-    market0_mint.totalValueLockedUSDUntracked = market0_mint.totalValueLockedUSDUntracked.plus(amount0USD_val) // Assuming same for untracked for now
-    market0_mint.save()
-    updateMarketDayData(market0_mint, event)
-    updateMarketHourData(market0_mint, event)
-  }
-
-  let market1_mint = Market.load(token1.market)
-  if (market1_mint) {
-    let amount1USD_val = amount1.times(token1.derivedMatic.times(bundle.maticPriceUSD))
-    // Check if different market to avoid double counting TVL
-    if (market0_mint === null || market1_mint.id != market0_mint.id) {
-      market1_mint.totalValueLocked = market1_mint.totalValueLocked.plus(amount1)
-      market1_mint.totalValueLockedUSD = market1_mint.totalValueLockedUSD.plus(amount1USD_val)
-      market1_mint.totalValueLockedUSDUntracked = market1_mint.totalValueLockedUSDUntracked.plus(amount1USD_val) // Assuming same for untracked for now
-      market1_mint.save()
-      updateMarketDayData(market1_mint, event)
-      updateMarketHourData(market1_mint, event)
-    } else if (market0_mint !== null && market1_mint.id == market0_mint.id) {
-      // If it's the same market, it has already been updated by market0_mint logic for its token0 component (amount0).
-      // We only need to add the token1 component (amount1) to the already updated market0_mint.
-      // This ensures totalValueLocked reflects both amount0 and amount1 for the *same* market.
-      // Note: market0_mint was saved before, so we are loading it again effectively here if we used market0_mint.plus() directly on the old var.
-      // Instead, we act on market0_mint which IS the single market entity for both tokens.
-      market0_mint.totalValueLocked = market0_mint.totalValueLocked.plus(amount1) // Add amount1 to existing market TVL
-      market0_mint.totalValueLockedUSD = market0_mint.totalValueLockedUSD.plus(amount1USD_val)
-      market0_mint.totalValueLockedUSDUntracked = market0_mint.totalValueLockedUSDUntracked.plus(amount1USD_val)
-      market0_mint.save() // Save again with amount1 contribution
-      // No need to call updateMarketDay/HourData again, it was called after amount0 update and will reflect this save.
-      // Or, call it again to be absolutely sure it reflects the sum if marketUpdates aren't cumulative themselves.
-      // Given marketUpdates copy from market, calling again after this final save is safest.
-      updateMarketDayData(market0_mint, event)
-      updateMarketHourData(market0_mint, event)
-    }
-  }
-
   token0.save()
   token1.save()
   pool.save()
@@ -242,7 +234,6 @@ export function handleMint(event: MintEvent): void {
 
 export function handleBurn(event: BurnEvent): void {
 
-  let bundle = Bundle.load('1')!
   let poolAddress = event.address.toHexString()
   let pool = Pool.load(poolAddress)!
   if (pool === null) {
@@ -264,23 +255,45 @@ export function handleBurn(event: BurnEvent): void {
   }
 
   let amountUSD = amount0
-    .times(token0.derivedMatic.times(bundle.maticPriceUSD))
-    .plus(amount1.times(token1.derivedMatic.times(bundle.maticPriceUSD)))
+    .times(token0.derivedMatic)
+    .plus(amount1.times(token1.derivedMatic))
 
   // reset tvl aggregates until new amounts calculated
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(pool.totalValueLockedMatic)
   // update globals
   factory.txCount = factory.txCount.plus(ONE_BI)
 
+  // reset market tvl aggregates until new amounts calculated
+  // reset market tvl aggregates until new amounts calculated
+  if (token0.market !== null) {
+    let market = Market.load(token0.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.minus(pool.totalValueLockedUSD)
+      market.save()
+      updateMarketDayData(market, event)
+      updateMarketHourData(market, event)
+    }
+  }
+  if (token1.market !== null && token1.market !== token0.market) {
+    let market = Market.load(token1.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.minus(pool.totalValueLockedUSD)
+      market.save()
+      updateMarketDayData(market, event)
+      updateMarketHourData(market, event)
+
+    }
+  }
+
   // update token0 data
   token0.txCount = token0.txCount.plus(ONE_BI)
   token0.totalValueLocked = token0.totalValueLocked.minus(amount0)
-  token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic.times(bundle.maticPriceUSD))
+  token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic)
 
   // update token1 data
   token1.txCount = token1.txCount.plus(ONE_BI)
   token1.totalValueLocked = token1.totalValueLocked.minus(amount1)
-  token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic.times(bundle.maticPriceUSD))
+  token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic)
 
   // pool data
   pool.txCount = pool.txCount.plus(ONE_BI)
@@ -299,13 +312,34 @@ export function handleBurn(event: BurnEvent): void {
   pool.totalValueLockedMatic = pool.totalValueLockedToken0
     .times(token0.derivedMatic)
     .plus(pool.totalValueLockedToken1.times(token1.derivedMatic))
-  pool.totalValueLockedUSD = pool.totalValueLockedMatic.times(bundle.maticPriceUSD)
+  pool.totalValueLockedUSD = pool.totalValueLockedMatic
 
   // reset aggregates with new amounts
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
-  factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
+  factory.totalValueLockedUSD = factory.totalValueLockedMatic
 
+  // reset market tvl aggregates until new amounts calculated
 
+  // reset market tvl aggregates until new amounts calculated
+  if (token0.market !== null) {
+    let market = Market.load(token0.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.plus(pool.totalValueLockedUSD)
+      market.save()
+      updateMarketDayData(market, event)
+      updateMarketHourData(market, event)
+    }
+  }
+  if (token1.market !== null && token1.market !== token0.market) {
+    let market = Market.load(token1.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.plus(pool.totalValueLockedUSD)
+      market.save()
+      updateMarketDayData(market, event)
+      updateMarketHourData(market, event)
+
+    }
+  }
 
   // burn entity
   let transaction = loadTransaction(event)
@@ -353,39 +387,6 @@ export function handleBurn(event: BurnEvent): void {
   updateTickFeeVarsAndSave(lowerTick, event)
   updateTickFeeVarsAndSave(upperTick, event)
 
-  // Update Market Day/Hour Data based on potentially updated Market TVL
-  let market0_burn = Market.load(token0.market)
-  if (market0_burn) {
-    let amount0USD_val = amount0.times(token0.derivedMatic.times(bundle.maticPriceUSD))
-    market0_burn.totalValueLocked = market0_burn.totalValueLocked.minus(amount0)
-    market0_burn.totalValueLockedUSD = market0_burn.totalValueLockedUSD.minus(amount0USD_val)
-    market0_burn.totalValueLockedUSDUntracked = market0_burn.totalValueLockedUSDUntracked.minus(amount0USD_val)
-    market0_burn.save()
-    updateMarketDayData(market0_burn, event)
-    updateMarketHourData(market0_burn, event)
-  }
-
-  let market1_burn = Market.load(token1.market)
-  if (market1_burn) {
-    let amount1USD_val = amount1.times(token1.derivedMatic.times(bundle.maticPriceUSD))
-    if (market0_burn === null || market1_burn.id != market0_burn.id) {
-      market1_burn.totalValueLocked = market1_burn.totalValueLocked.minus(amount1)
-      market1_burn.totalValueLockedUSD = market1_burn.totalValueLockedUSD.minus(amount1USD_val)
-      market1_burn.totalValueLockedUSDUntracked = market1_burn.totalValueLockedUSDUntracked.minus(amount1USD_val)
-      market1_burn.save()
-      updateMarketDayData(market1_burn, event)
-      updateMarketHourData(market1_burn, event)
-    } else if (market0_burn !== null && market1_burn.id == market0_burn.id) {
-      // Same market, apply amount1 changes to the already modified market0_burn entity
-      market0_burn.totalValueLocked = market0_burn.totalValueLocked.minus(amount1)
-      market0_burn.totalValueLockedUSD = market0_burn.totalValueLockedUSD.minus(amount1USD_val)
-      market0_burn.totalValueLockedUSDUntracked = market0_burn.totalValueLockedUSDUntracked.minus(amount1USD_val)
-      market0_burn.save()
-      updateMarketDayData(market0_burn, event)
-      updateMarketHourData(market0_burn, event)
-    }
-  }
-
   token0.save()
   token1.save()
   pool.save()
@@ -394,7 +395,6 @@ export function handleBurn(event: BurnEvent): void {
 }
 
 export function handleSwap(event: SwapEvent): void {
-  let bundle = Bundle.load('1')!
   let factory = Factory.load(FACTORY_ADDRESS)!
   let pool = Pool.load(event.address.toHexString())!
   if (pool === null) {
@@ -438,15 +438,15 @@ export function handleSwap(event: SwapEvent): void {
   let amount0Matic = amount0Abs.times(token0.derivedMatic)
   let amount1Matic = amount1Abs.times(token1.derivedMatic)
 
-  let amount0USD = amount0Matic.times(bundle.maticPriceUSD)
-  let amount1USD = amount1Matic.times(bundle.maticPriceUSD)
+  let amount0USD = amount0Matic
+  let amount1USD = amount1Matic
 
   // get amount that should be tracked only - div 2 because cant count both input and output as volume
   let amountTotalUSDTracked = getTrackedAmountUSD(amount0Abs, token0 as Token, amount1Abs, token1 as Token).div(
     BigDecimal.fromString('2')
   )
 
-  let amountTotalMaticTracked = safeDiv(amountTotalUSDTracked, bundle.maticPriceUSD)
+  let amountTotalMaticTracked = amountTotalUSDTracked
   let amountTotalUSDUntracked = amount0USD.plus(amount1USD).div(BigDecimal.fromString('2'))
 
   let feesMatic = amountTotalMaticTracked.times(pool.fee.toBigDecimal()).div(BigDecimal.fromString('1000000'))
@@ -464,6 +464,24 @@ export function handleSwap(event: SwapEvent): void {
   // reset aggregate tvl before individual pool tvl updates
   let currentPoolTvlMatic = pool.totalValueLockedMatic
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.minus(currentPoolTvlMatic)
+
+  // reset market tvl aggregates until new amounts calculated
+
+  // reset market tvl aggregates until new amounts calculated
+  if (token0.market !== null) {
+    let market = Market.load(token0.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.minus(pool.totalValueLockedUSD)
+      market.save()
+    }
+  }
+  if (token1.market !== null && token1.market !== token0.market) {
+    let market = Market.load(token1.market!)
+    if (market !== null) {
+      market.totalValueLockedUSD = market.totalValueLockedUSD.minus(pool.totalValueLockedUSD)
+      market.save()
+    }
+  }
 
   // pool volume
   pool.volumeToken0 = pool.volumeToken0.plus(amount0Abs)
@@ -483,7 +501,7 @@ export function handleSwap(event: SwapEvent): void {
 
   // Update eternal farming active liquidity if tick changed
   if (oldTick === null || !oldTick.equals(currentTick)) {
-    updateEternalFarmingActiveLiquidity(pool.id, oldTick, currentTick)
+    updateEternalFarmingActiveLiquidity(pool, event)
   }
 
   // update token0 data
@@ -502,40 +520,6 @@ export function handleSwap(event: SwapEvent): void {
   token1.feesUSD = token1.feesUSD.plus(feesUSD)
   token1.txCount = token1.txCount.plus(ONE_BI)
 
-  // NEW: Market updates section
-  let market0_swap = Market.load(token0.market)
-  if (market0_swap) {
-    market0_swap.volume = market0_swap.volume.plus(amount0Abs)
-    market0_swap.volumeUSD = market0_swap.volumeUSD.plus(amount0USD)
-    market0_swap.untrackedVolumeUSD = market0_swap.untrackedVolumeUSD.plus(amount0USD)
-
-    market0_swap.totalValueLocked = market0_swap.totalValueLocked.plus(amount0_)
-    market0_swap.totalValueLockedUSD = market0_swap.totalValueLockedUSD.plus(amount0USD)
-    market0_swap.totalValueLockedUSDUntracked = market0_swap.totalValueLockedUSDUntracked.plus(amount0USD)
-  }
-
-  let market1_swap = Market.load(token1.market)
-  if (market1_swap) {
-    if (market0_swap !== null && market1_swap.id == market0_swap.id) {
-      market0_swap.volume = market0_swap.volume.plus(amount1Abs)
-      market0_swap.volumeUSD = market0_swap.volumeUSD.plus(amount1USD)
-      market0_swap.untrackedVolumeUSD = market0_swap.untrackedVolumeUSD.plus(amount1USD)
-
-      market0_swap.totalValueLocked = market0_swap.totalValueLocked.plus(amount1_)
-      market0_swap.totalValueLockedUSD = market0_swap.totalValueLockedUSD.plus(amount1USD)
-      market0_swap.totalValueLockedUSDUntracked = market0_swap.totalValueLockedUSDUntracked.plus(amount1USD)
-    } else {
-      market1_swap.volume = market1_swap.volume.plus(amount1Abs)
-      market1_swap.volumeUSD = market1_swap.volumeUSD.plus(amount1USD)
-      market1_swap.untrackedVolumeUSD = market1_swap.untrackedVolumeUSD.plus(amount1USD)
-
-      market1_swap.totalValueLocked = market1_swap.totalValueLocked.plus(amount1_)
-      market1_swap.totalValueLockedUSD = market1_swap.totalValueLockedUSD.plus(amount1USD)
-      market1_swap.totalValueLockedUSDUntracked = market1_swap.totalValueLockedUSDUntracked.plus(amount1USD)
-    }
-  }
-  // END NEW: Market updates section
-
   // updated pool rates
   let prices = priceToTokenPrices(pool.sqrtPrice, token0 as Token, token1 as Token)
   pool.token0Price = prices[0]
@@ -549,10 +533,6 @@ export function handleSwap(event: SwapEvent): void {
 
   pool.save()
 
-  // update USD pricing
-  bundle.maticPriceUSD = getEthPriceInUSD()
-  bundle.save()
-
   token0.derivedMatic = findEthPerToken(token0 as Token, event.block)
   token1.derivedMatic = findEthPerToken(token1 as Token, event.block)
 
@@ -562,13 +542,48 @@ export function handleSwap(event: SwapEvent): void {
   pool.totalValueLockedMatic = pool.totalValueLockedToken0
     .times(token0.derivedMatic)
     .plus(pool.totalValueLockedToken1.times(token1.derivedMatic))
-  pool.totalValueLockedUSD = pool.totalValueLockedMatic.times(bundle.maticPriceUSD)
+  pool.totalValueLockedUSD = pool.totalValueLockedMatic
+
+
+  // Update Market TVL and volume for any tokens that have markets
+  if (token0.market !== null) {
+    let market0_swap = Market.load(token0.market!)
+    if (market0_swap === null) {
+      log.error('mybug market0_swap is null', [])
+      return
+    }
+    market0_swap.volume = market0_swap.volume.plus(amount0Abs)
+    market0_swap.volumeUSD = market0_swap.volumeUSD.plus(amount0USD).plus(amount1USD)
+    market0_swap.untrackedVolumeUSD = market0_swap.untrackedVolumeUSD.plus(amount0USD)
+    market0_swap.totalValueLockedUSD = market0_swap.totalValueLockedUSD.plus(pool.totalValueLockedUSD)
+    updateMarketDayData(market0_swap, event)
+    updateMarketHourData(market0_swap, event)
+    market0_swap.save()
+  }
+
+  if (token1.market !== null && token1.market !== token0.market) {
+    let market1_swap = Market.load(token1.market!)
+    if (market1_swap === null) {
+      log.error('mybug market1_swap is null', [])
+      return
+    }
+
+    market1_swap.volume = market1_swap.volume.plus(amount1Abs)
+    market1_swap.volumeUSD = market1_swap.volumeUSD.plus(amount1USD).plus(amount0USD)
+    market1_swap.untrackedVolumeUSD = market1_swap.untrackedVolumeUSD.plus(amount1USD)
+    market1_swap.totalValueLockedUSD = market1_swap.totalValueLockedUSD.plus(pool.totalValueLockedUSD)
+    updateMarketDayData(market1_swap, event)
+    updateMarketHourData(market1_swap, event)
+    market1_swap.save()
+  }
 
   factory.totalValueLockedMatic = factory.totalValueLockedMatic.plus(pool.totalValueLockedMatic)
-  factory.totalValueLockedUSD = factory.totalValueLockedMatic.times(bundle.maticPriceUSD)
+  factory.totalValueLockedUSD = factory.totalValueLockedMatic
 
-  token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic).times(bundle.maticPriceUSD)
-  token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic).times(bundle.maticPriceUSD)
+
+  // reset market tvl aggregates until new amounts calculated
+  token0.totalValueLockedUSD = token0.totalValueLocked.times(token0.derivedMatic)
+  token1.totalValueLockedUSD = token1.totalValueLocked.times(token1.derivedMatic)
 
   // create Swap event
   let transaction = loadTransaction(event)
@@ -696,22 +711,6 @@ export function handleSwap(event: SwapEvent): void {
     }
   }
 
-  // NEW: Market Day/Hour Data updates (after potential market entity updates)
-  if (market0_swap) {
-    market0_swap.save() // Save market0_swap before updating its interval data
-    updateMarketDayData(market0_swap, event)
-    updateMarketHourData(market0_swap, event)
-  }
-  if (market1_swap) {
-    // If market1_swap is distinct from market0_swap, save and update its interval data
-    if (market0_swap === null || market1_swap.id != market0_swap.id) {
-      market1_swap.save() // Save market1_swap before updating its interval data
-      updateMarketDayData(market1_swap, event)
-      updateMarketHourData(market1_swap, event)
-    }
-    // If market1_swap was the same as market0_swap, market0_swap (which is the same entity) was already saved and its interval data updated.
-  }
-  // END NEW: Market Day/Hour Data updates
 }
 
 export function handleSetCommunityFee(event: CommunityFee): void {

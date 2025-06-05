@@ -1,44 +1,14 @@
 import { WHITELIST_TOKENS } from './../utils/pricing'
 /* eslint-disable prefer-const */
-import { FACTORY_ADDRESS, ZERO_BI, ONE_BI, ZERO_BD, ADDRESS_ZERO, pools_list, SDAI_ADDRESS } from './../utils/constants'
-import { Factory } from '../../../generated/schema'
+import { FACTORY_ADDRESS, ZERO_BI, ONE_BI, ZERO_BD, ADDRESS_ZERO, pools_list, SDAI_ADDRESS, WXDAI_ADDRESS } from './../utils/constants'
+import { Factory, Market } from '../../../generated/schema'
 import { Pool as PoolEvent } from '../../../generated/Factory/Factory'
 import { DefaultCommunityFee } from '../../../generated/Factory/Factory'
-import { Pool, Token, Bundle } from '../../../generated/schema'
+import { Pool, Token } from '../../../generated/schema'
 import { Pool as PoolTemplate } from '../../../generated/templates'
 import { fetchTokenSymbol, fetchTokenName, fetchTokenTotalSupply, fetchTokenDecimals } from '../utils/token'
 import { log, BigInt, Address } from '@graphprotocol/graph-ts'
-
-function newToken(token_address: Address): Token | null {
-  let token = new Token(token_address.toHexString())
-  token.symbol = fetchTokenSymbol(token_address)
-  token.name = fetchTokenName(token_address)
-  token.totalSupply = fetchTokenTotalSupply(token_address)
-  let decimals = fetchTokenDecimals(token_address)
-
-  // bail if we couldn't figure out the decimals
-  if (decimals === null) {
-    log.debug('mybug the decimal on token 0 was null', [])
-    return null
-  }
-
-  token.decimals = decimals
-  token.derivedMatic = ZERO_BD
-  token.volume = ZERO_BD
-  token.volumeUSD = ZERO_BD
-  token.feesUSD = ZERO_BD
-  token.untrackedVolumeUSD = ZERO_BD
-  token.totalValueLocked = ZERO_BD
-  token.totalValueLockedUSD = ZERO_BD
-  token.totalValueLockedUSDUntracked = ZERO_BD
-  token.txCount = ZERO_BI
-  token.poolCount = ZERO_BI
-  token.whitelistPools = []
-  token.isSeer = false
-  token.market = ADDRESS_ZERO
-  token.save()
-  return token
-}
+import { createTokenEntity } from '../../algebra-farming/utils/token'
 
 export function handlePoolCreated(event: PoolEvent): void {
 
@@ -48,16 +18,32 @@ export function handlePoolCreated(event: PoolEvent): void {
   let token0 = Token.load(token0_address.toHexString())
   let token1 = Token.load(token1_address.toHexString())
 
-  // only sdai and seer tokens
-  if (token0_address.toHexString() == SDAI_ADDRESS) {
-    token0 = newToken(token0_address)
-  }
-  if (token1_address.toHexString() == SDAI_ADDRESS) {
-    token1 = newToken(token1_address)
+  // create wxdai or sdai if they are not registered
+
+  if (token0 === null && (token0_address.toHexString() === WXDAI_ADDRESS || token0_address.toHexString() === SDAI_ADDRESS)) {
+    let success = createTokenEntity(token0_address, false, Address.fromString(ADDRESS_ZERO))
+    if (!success) {
+      log.error('mybug the token was null', [])
+      return
+    }
   }
 
-  // either both tokens are whitelisted or atleast 1 token must be a seer token
+  if (token1 === null && (token1_address.toHexString() === WXDAI_ADDRESS || token1_address.toHexString() === SDAI_ADDRESS)) {
+    let success = createTokenEntity(token1_address, false, Address.fromString(ADDRESS_ZERO))
+    if (!success) {
+      log.error('mybug the token was null', [])
+      return
+    }
+  }
+
+  token0 = Token.load(token0_address.toHexString())
+  token1 = Token.load(token1_address.toHexString())
+
   if (!token0 || !token1) {
+    return
+  }
+
+  if (!(token0.isSeer || token1.isSeer)) {
     return
   }
 
@@ -79,11 +65,6 @@ export function handlePoolCreated(event: PoolEvent): void {
     factory.txCount = ZERO_BI
     factory.owner = ADDRESS_ZERO
     factory.defaultCommunityFee = BigInt.fromI32(0)
-
-    // create new bundle for tracking matic price
-    let bundle = new Bundle('1')
-    bundle.maticPriceUSD = ZERO_BD
-    bundle.save()
   }
 
   factory.poolCount = factory.poolCount.plus(ONE_BI)
@@ -96,8 +77,32 @@ export function handlePoolCreated(event: PoolEvent): void {
     token0_address = event.params.token1
     token1_address = event.params.token0
   }
+  // load markets from tokens
+  pool.market0 = token0!.market ? token0!.market : token1!.market
 
+  // atleast one market should exist
+  let market0 = Market.load(pool.market0!)
+  if (token1!.market !== null && token0!.market !== null) {
+    let market1 = Market.load(token1!.market!)
 
+    if (market0 !== null && market1 !== null) {
+      // check if one market is child of the other
+      // make parent market0
+      if (market0.parentMarket === market1.id) {
+        pool.market0 = market1.id
+        pool.market1 = market0.id
+      } else if (market1.parentMarket === market0.id) {
+        pool.market0 = market0.id
+        pool.market1 = market1.id
+      } else if (market0.id === market1.id) {
+        pool.market0 = market0.id
+        // don't duplicate market
+      } else {
+        pool.market0 = market0.id
+        pool.market1 = market1.id
+      }
+    }
+  }
   // update white listed pools
   if (WHITELIST_TOKENS.includes(token0!.id)) {
     let newPools = token1!.whitelistPools
@@ -170,11 +175,6 @@ export function handleDefaultCommFeeChange(event: DefaultCommunityFee): void {
     factory.totalValueLockedMaticUntracked = ZERO_BD
     factory.txCount = ZERO_BI
     factory.owner = ADDRESS_ZERO
-
-    // create new bundle for tracking matic price
-    let bundle = new Bundle('1')
-    bundle.maticPriceUSD = ZERO_BD
-    bundle.save()
   }
   factory.defaultCommunityFee = BigInt.fromI32(event.params.newDefaultCommunityFee as i32)
   factory.save()
