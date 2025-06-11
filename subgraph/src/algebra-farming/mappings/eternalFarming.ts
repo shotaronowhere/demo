@@ -1,4 +1,4 @@
-import { ethereum, crypto, BigInt, Address, log } from '@graphprotocol/graph-ts';
+import { ethereum, crypto, BigInt, BigDecimal, Address, log } from '@graphprotocol/graph-ts';
 import {
   EternalFarmingCreated,
   FarmEntered,
@@ -10,9 +10,9 @@ import {
   RewardAmountsDecreased,
   RewardsCollected
 } from '../../../generated/EternalFarming/EternalFarming';
-import { Deposit, Reward, EternalFarming, Pool, Position } from '../../../generated/schema';
+import { Deposit, Reward, EternalFarming, Pool } from '../../../generated/schema';
 import { createTokenEntity } from '../utils/token'
-import { ADDRESS_ZERO, ZERO_BD } from '../../algebra/utils/constants';
+import { ADDRESS_ZERO } from '../../algebra/utils/constants';
 import { EternalVirtualPool } from '../../../generated/EternalFarming/EternalVirtualPool';
 
 const infinity = BigInt.fromString("18446744073709551615");
@@ -48,7 +48,7 @@ export function handleIncentiveCreated(event: EternalFarmingCreated): void {
   if (entity == null) {
     entity = new EternalFarming(incentiveId.toHex());
     entity.reward = BigInt.fromString("0");
-    entity.rewardVirtual = BigInt.fromString("0");
+    entity.rewardReserve = BigInt.fromString("0");
     entity.bonusReward = BigInt.fromString("0");
     entity.rewardRate = BigInt.fromString("0");
     entity.bonusRewardRate = BigInt.fromString("0");
@@ -56,15 +56,14 @@ export function handleIncentiveCreated(event: EternalFarmingCreated): void {
     entity.timestampActiveLiquidity = BigInt.fromString("0");
     entity.totalLiquidity = BigInt.fromString("0");
     entity.totalActiveLiquidity = BigInt.fromString("0");
+    entity.totalAmountUSDEstimated = BigDecimal.fromString("0");
   }
   entity.rewardToken = event.params.rewardToken;
   entity.bonusRewardToken = event.params.bonusRewardToken;
   entity.pool = event.params.pool.toHexString();
   entity.virtualPool = event.params.virtualPool;
   entity.startTime = event.params.startTime;
-  entity.startTimeVirtual = event.params.startTime;
   entity.endTime = event.params.endTime;
-  entity.endTimeImpliedVirtual = infinity;
   entity.isDetached = false;
   entity.minRangeLength = BigInt.fromI32(event.params.minimalAllowedPositionWidth)
   entity.tokenAmountForTier1 = event.params.tiers.tokenAmountForTier1;
@@ -85,42 +84,15 @@ export function handleTokenStaked(event: FarmEntered): void {
     entity.enteredInEternalFarming = event.block.timestamp;
     entity.tokensLockedEternal = event.params.tokensLocked;
     entity.tierEternal = getTier(event.params.tokensLocked, event.params.incentiveId.toHexString())
-
-    // CRITICAL FIX: Store the liquidity amount at the time of staking for this farm.
-    // This 'entity.liquidity' (Deposit.liquidity) will now be the single source of truth 
-    // for this specific farm participation.
     entity.liquidity = event.params.liquidity;
     entity.save();
 
     // Update eternal farming liquidity totals
     let eternalFarming = EternalFarming.load(event.params.incentiveId.toHexString())
     if (eternalFarming) {
-      // Add to total liquidity using the now consistently set entity.liquidity
-      if (eternalFarming.totalActiveLiquidity.equals(BigInt.zero())) {
-        // load virtual pool binding to contract
-        let virtualPool = EternalVirtualPool.bind(Address.fromBytes(eternalFarming.virtualPool)) as EternalVirtualPool
-        let currentLiquidity = virtualPool.try_currentLiquidity()
-        let startFarming = false;
-        if (currentLiquidity.reverted) {
-          log.error("Virtual pool data reverted in handleTokenStaked", [])
-          startFarming = event.params.liquidity.gt(BigInt.zero()) && eternalFarming.totalLiquidity.equals(BigInt.zero());
-        } else {
-          eternalFarming.totalActiveLiquidity = currentLiquidity.value
-          if (eternalFarming.totalActiveLiquidity.gt(BigInt.zero())) {
-            startFarming = true;
-          }
-        }
-        if (startFarming) {
-          if (!event.block.timestamp.lt(eternalFarming.startTime)) {
-            eternalFarming.startTimeVirtual = event.block.timestamp;
-            eternalFarming.endTimeImpliedVirtual = event.block.timestamp.plus(eternalFarming.rewardVirtual.div(eternalFarming.rewardRate))
-          } else {
-            eternalFarming.startTimeVirtual = eternalFarming.startTime;
-            eternalFarming.endTimeImpliedVirtual = eternalFarming.startTime.plus(eternalFarming.rewardVirtual.div(eternalFarming.rewardRate))
-          }
-        }
-      }
-      eternalFarming.totalLiquidity = eternalFarming.totalLiquidity.plus(entity.liquidity)
+      eternalFarming.totalLiquidity = eternalFarming.totalLiquidity.plus(event.params.liquidity)
+      eternalFarming.totalAmountUSDEstimated = eternalFarming.totalAmountUSDEstimated.plus(entity.mintUSD)
+      updateEternalFarming(eternalFarming, event)
       eternalFarming.save()
     }
   }
@@ -145,48 +117,19 @@ export function handleTokenUnstaked(event: FarmEnded): void {
 
   if (entity) {
     let eternalFarming = EternalFarming.load(entity.eternalFarming!)
-
     if (eternalFarming) {
       eternalFarming.reward = eternalFarming.reward.minus(event.params.reward)
       eternalFarming.bonusReward = eternalFarming.bonusReward.minus(event.params.bonusReward)
-
-      // Subtract liquidity from totals
       eternalFarming.totalLiquidity = eternalFarming.totalLiquidity.minus(entity.liquidity)
-
-      let turnOffFarming = eternalFarming.totalLiquidity.equals(BigInt.zero())
-      // bind to virtual pool
-      let virtualPool = EternalVirtualPool.bind(Address.fromBytes(eternalFarming.virtualPool)) as EternalVirtualPool
-      let currentLiquidity = virtualPool.try_currentLiquidity()
-      if (currentLiquidity.reverted) {
-        log.warning("Virtual pool data reverted in handleTokenUnstaked", [])
-      } else {
-        eternalFarming.totalActiveLiquidity = currentLiquidity.value
-        if (eternalFarming.totalActiveLiquidity.equals(BigInt.zero())) {
-          turnOffFarming = true;
-        }
-        eternalFarming.save()
-      }
-      if (!event.block.timestamp.lt(eternalFarming.endTimeImpliedVirtual)) {
-        eternalFarming.rewardVirtual = BigInt.zero();
-        eternalFarming.save();
-      } else if (turnOffFarming && !eternalFarming.startTime.gt(event.block.timestamp)) {
-        // max value of BigInt
-        let elapsedTime = event.block.timestamp.minus(eternalFarming.startTimeVirtual)
-        let calcVirtualReward = eternalFarming.rewardVirtual.minus(eternalFarming.rewardRate.times(elapsedTime))
-        eternalFarming.rewardVirtual = calcVirtualReward.gt(BigInt.zero()) ? calcVirtualReward : BigInt.zero()
-        if (eternalFarming.rewardVirtual.gt(BigInt.zero())) {
-          eternalFarming.endTimeImpliedVirtual = infinity
-        }
-        eternalFarming.save()
-      }
+      eternalFarming.totalAmountUSDEstimated = eternalFarming.totalAmountUSDEstimated.minus(entity.mintUSD)
+      updateEternalFarming(eternalFarming, event)
+      eternalFarming.save()
     }
 
-    if (entity != null) {
-      entity.eternalFarming = null;
-      entity.tierEternal = BigInt.fromString("0")
-      entity.tokensLockedEternal = BigInt.fromString("0")
-      entity.save();
-    }
+    entity.eternalFarming = null;
+    entity.tierEternal = BigInt.fromString("0")
+    entity.tokensLockedEternal = BigInt.fromString("0")
+    entity.save();
 
     let id = event.params.rewardAddress.toHexString() + event.params.owner.toHexString()
     let rewardEntity = Reward.load(id)
@@ -214,31 +157,40 @@ export function handleTokenUnstaked(event: FarmEnded): void {
     rewardEntity.rewardAddress = event.params.bonusRewardToken
     rewardEntity.amount = rewardEntity.amount.plus(event.params.bonusReward)
     rewardEntity.save();
-
   }
 }
 
 // helper function for core swap which price changes tick
-export function updateEternalFarmingActiveLiquidity(pool: Pool, event: ethereum.Event): void {
-  let eternalFarming = EternalFarming.load(pool.id)
-  if (eternalFarming) {
-    let virtualPool = EternalVirtualPool.bind(Address.fromBytes(eternalFarming.virtualPool)) as EternalVirtualPool
-    let currentLiquidity = virtualPool.try_currentLiquidity()
-    if (currentLiquidity.reverted) {
-      log.warning("Virtual pool data reverted in updateEternalFarmingActiveLiquidity", [])
+export function updateEternalFarming(eternalFarming: EternalFarming, event: ethereum.Event): void {
+  let virtualPool = EternalVirtualPool.bind(Address.fromBytes(eternalFarming.virtualPool)) as EternalVirtualPool
+  let currentLiquidity = virtualPool.try_currentLiquidity()
+  if (currentLiquidity.reverted) {
+    log.warning("Virtual pool data reverted in updateEternalFarmingActiveLiquidity", [])
+  } else {
+    eternalFarming.totalActiveLiquidity = currentLiquidity.value
+  }
+  let rewardReserve = virtualPool.try_rewardReserve0()
+  if (rewardReserve.reverted) {
+    log.warning("Virtual pool data reverted in updateEternalFarmingActiveLiquidity", [])
+  } else {
+    eternalFarming.rewardReserve = rewardReserve.value
+  }
+  let rewardRate = virtualPool.try_rewardRate0()
+  if (rewardRate.reverted) {
+    log.warning("Virtual pool data reverted in updateEternalFarmingActiveLiquidity", [])
+  } else {
+    eternalFarming.rewardRate = rewardRate.value
+  }
+  if (eternalFarming.rewardRate != BigInt.fromString("0") && eternalFarming.totalActiveLiquidity.gt(BigInt.zero())) {
+    eternalFarming.endTimeImplied = event.block.timestamp.plus(eternalFarming.rewardReserve.div(eternalFarming.rewardRate))
+  } else {
+    if (eternalFarming.rewardReserve.gt(BigInt.zero())) {
+      eternalFarming.endTimeImplied = infinity
     } else {
-      eternalFarming.totalActiveLiquidity = currentLiquidity.value
-    } if (event.block.timestamp.lt(eternalFarming.endTimeImpliedVirtual) &&
-      eternalFarming.totalActiveLiquidity.equals(BigInt.zero()) && !eternalFarming.startTime.gt(event.block.timestamp)) {
-      let elapsedTime = event.block.timestamp.minus(eternalFarming.startTimeVirtual)
-      let calcVirtualReward = eternalFarming.rewardVirtual.minus(eternalFarming.rewardRate.times(elapsedTime))
-      eternalFarming.rewardVirtual = calcVirtualReward.gt(BigInt.zero()) ? calcVirtualReward : BigInt.zero()
-      if (eternalFarming.rewardVirtual.gt(BigInt.zero())) {
-        eternalFarming.endTimeImpliedVirtual = infinity
-      }
-      eternalFarming.save()
+      eternalFarming.endTimeImplied = event.block.timestamp
     }
   }
+  eternalFarming.save()
 }
 
 export function handleDeactivate(event: IncentiveDeactivated): void {
@@ -270,7 +222,6 @@ export function handleDeactivate(event: IncentiveDeactivated): void {
 }
 
 export function handleRewardAmountsDecreased(event: RewardAmountsDecreased): void {
-  /*
   let incentive = EternalFarming.load(event.params.incentiveId.toHexString())
   if (incentive) {
     incentive.bonusReward = incentive.bonusReward.minus(event.params.bonusReward)
@@ -278,8 +229,10 @@ export function handleRewardAmountsDecreased(event: RewardAmountsDecreased): voi
     if (incentive.totalLiquidity.equals(BigInt.zero())) {
       incentive.endTimeImplied = incentive.startTime.plus(incentive.reward.div(incentive.rewardRate))
     }
+    updateEternalFarming(incentive, event)
     incentive.save()
-  }*/
+  }
+
   // assume never happens
   log.error("RewardAmountsDecreased should never happen", [])
 }
@@ -288,17 +241,12 @@ export function handleRewardsRatesChanged(event: RewardsRatesChanged): void {
   let eternalFarming = EternalFarming.load(event.params.incentiveId.toHexString())
   if (eternalFarming) {
     if (eternalFarming.rewardRate != BigInt.fromString("0")) {
-      log.error("RewardsRatesChanged should never happen", [])
+      log.error("RewardsRatesChanged should never happen", [event.params.incentiveId.toHexString()])
       return;
     }
     eternalFarming.rewardRate = event.params.rewardRate
     eternalFarming.bonusRewardRate = event.params.bonusRewardRate
-    if (eternalFarming.rewardRate != BigInt.fromString("0")) {
-      // just simple math
-      eternalFarming.endTimeImplied = eternalFarming.startTime.plus(eternalFarming.reward.div(eternalFarming.rewardRate))
-      // assumes no one staked after the start
-      eternalFarming.endTimeImpliedVirtual = infinity;
-    }
+    updateEternalFarming(eternalFarming, event)
 
     eternalFarming.save()
   }
@@ -312,8 +260,8 @@ export function handleRewardsAdded(event: RewardsAdded): void {
       return;
     }
     eternalFarming.reward = eternalFarming.reward.plus(event.params.rewardAmount)
-    eternalFarming.rewardVirtual = eternalFarming.rewardVirtual.plus(event.params.rewardAmount)
     eternalFarming.bonusReward = eternalFarming.bonusReward.plus(event.params.bonusRewardAmount)
+    updateEternalFarming(eternalFarming, event)
     eternalFarming.save()
   }
 }
@@ -329,6 +277,9 @@ export function handleCollect(event: RewardsCollected): void {
     if (eternalFarming) {
       eternalFarming.reward = eternalFarming.reward.minus(event.params.rewardAmount)
       eternalFarming.bonusReward = eternalFarming.bonusReward.minus(event.params.bonusRewardAmount)
+      updateEternalFarming(eternalFarming, event)
+
+      eternalFarming.save()
       eternalFarming.save()
 
 

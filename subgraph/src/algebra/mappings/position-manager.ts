@@ -6,9 +6,9 @@ import {
   NonfungiblePositionManager,
   Transfer
 } from '../../../generated/NonfungiblePositionManager/NonfungiblePositionManager'
-import { Position, Deposit, PositionSnapshot, Token, Pool } from '../../../generated/schema'
+import { Position, Deposit, PositionSnapshot, Token, Pool, Mint } from '../../../generated/schema'
 import { ADDRESS_ZERO, factoryContract, ZERO_BD, ZERO_BI, pools_list } from '../utils/constants'
-import { Address, BigInt, ethereum } from '@graphprotocol/graph-ts'
+import { Address, BigInt, ethereum, log } from '@graphprotocol/graph-ts'
 import { convertTokenToDecimal, loadTransaction } from '../utils'
 import { FarmingCenterAddress } from '../../algebra-farming/utils/constants'
 
@@ -111,9 +111,7 @@ function savePositionSnapshot(position: Position, event: ethereum.Event): void {
 }
 
 export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
-
   let position = getPosition(event, event.params.tokenId)
-
   // position was not able to be fetched
   if (position == null) {
     return
@@ -164,6 +162,14 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
     if (pool == null) {
       return
     }
+    //  let mint = new Mint(pool.id.toString() + '#' + pool.txCount.toString())
+    entity.mint = event.transaction.hash.toHexString() + '#' + (event.logIndex.minus(BigInt.fromI32(2))).toString()
+    let mint = Mint.load(entity.mint)
+
+    entity.mintUSD = mint !== null ? mint!.amountUSD! : ZERO_BD
+    if (mint === null) {
+      log.error("Mint not found for pool {}", [event.transaction.hash.toHexString() + '#' + (event.logIndex.minus(BigInt.fromI32(2))).toString()])
+    }
     entity.market0 = pool.market0
     entity.market1 = pool.market1
     entity.onFarmingCenter = false;
@@ -175,7 +181,7 @@ export function handleIncreaseLiquidity(event: IncreaseLiquidity): void {
     entity.tierLimit = BigInt.fromString("0")
     entity.tierEternal = BigInt.fromString("0")
   }
-  entity.liquidity = entity.liquidity.plus(event.params.liquidity);
+  entity.liquidity = entity.liquidity.plus(event.params.actualLiquidity);
   entity.save();
 
 }

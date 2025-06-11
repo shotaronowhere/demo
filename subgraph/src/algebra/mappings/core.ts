@@ -1,5 +1,5 @@
 /* eslint-disable prefer-const */
-import { Burn, Factory, Mint, Pool, Swap, Tick, PoolPosition, Token, PoolFeeData, Market } from '../../../generated/schema'
+import { Burn, Factory, Mint, Pool, Swap, Tick, PoolPosition, Token, PoolFeeData, Market, EternalFarming } from '../../../generated/schema'
 import { Pool as PoolABI } from '../../../generated/Factory/Pool'
 import { BigDecimal, BigInt, ethereum, log } from '@graphprotocol/graph-ts'
 
@@ -27,7 +27,7 @@ import {
 } from '../utils/intervalUpdates'
 import { createTick } from '../utils/tick'
 import { updateMarketDayData, updateMarketHourData } from '../utils/marketUpdates'
-import { updateEternalFarmingActiveLiquidity } from '../../algebra-farming/mappings/eternalFarming'
+import { updateEternalFarming } from '../../algebra-farming/mappings/eternalFarming'
 
 export function handleInitialize(event: Initialize): void {
   let pool = Pool.load(event.address.toHexString())!
@@ -156,7 +156,8 @@ export function handleMint(event: MintEvent): void {
   }
 
   let transaction = loadTransaction(event)
-  let mint = new Mint(transaction.id.toString() + '#' + pool.txCount.toString())
+  let mint = new Mint(transaction.id + '#' + (event.logIndex.toString()))
+  log.info("Mint created for pool {}", [transaction.id + '#' + (event.logIndex.toString())])
   mint.transaction = transaction.id
   mint.timestamp = transaction.timestamp
   mint.pool = pool.id
@@ -501,7 +502,10 @@ export function handleSwap(event: SwapEvent): void {
 
   // Update eternal farming active liquidity if tick changed
   if (oldTick === null || !oldTick.equals(currentTick)) {
-    updateEternalFarmingActiveLiquidity(pool, event)
+    const eternalFarm = pool.eternalFarm.load()
+    if (eternalFarm.length > 0) {
+      updateEternalFarming(eternalFarm[0], event)
+    }
   }
 
   // update token0 data

@@ -209,6 +209,8 @@ type Token @entity(immutable: false) {
   pools0: [Pool!]! @derivedFrom(field: "token0")
   # pools derived from this token
   pools1: [Pool!]! @derivedFrom(field: "token1")
+  # collateral pool for the token
+  poolCollateral: Pool
   # market derived from this token
   market: Market
 }
@@ -892,14 +894,12 @@ type EternalFarming @entity(immutable: false) {
   bonusRewardToken: Bytes!
   virtualPool: Bytes!
   pool: Pool!
-  startTimeVirtual: BigInt!
   startTime: BigInt!
   endTime: BigInt!
   endTimeImplied: BigInt!
-  endTimeImpliedVirtual: BigInt!
   timestampActiveLiquidity: BigInt!
   reward: BigInt!
-  rewardVirtual: BigInt!
+  rewardReserve: BigInt!
   bonusReward: BigInt!
   rewardRate: BigInt!
   bonusRewardRate: BigInt!
@@ -919,10 +919,13 @@ type EternalFarming @entity(immutable: false) {
   totalLiquidity: BigInt! # Total liquidity staked in this farm
   totalActiveLiquidity: BigInt! # Total liquidity currently eligible for rewards
   # --- END ---
+  totalAmountUSDEstimated: BigDecimal!
 }
 
 type Deposit @entity(immutable: false) {
   id: ID! # This is the NFT Token ID from NonfungiblePositionManager
+  mint: Mint!
+  mintUSD: BigDecimal!
   L2tokenId: BigInt!
   owner: Bytes! # Current owner of the NFT
   onFarmingCenter: Boolean! # True if the NFT is staked in the FarmingCenter

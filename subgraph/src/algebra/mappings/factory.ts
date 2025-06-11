@@ -82,6 +82,13 @@ export function handlePoolCreated(event: PoolEvent): void {
 
   // atleast one market should exist
   let market0 = Market.load(pool.market0!)
+  if (market0!.collateralToken === token0!.id) {
+    token1!.poolCollateral = pool.id
+  } else if (market0!.collateralToken === token1!.id) {
+    token0!.poolCollateral = pool.id
+  }
+
+  // cannonical ordering of markets
   if (token1!.market !== null && token0!.market !== null) {
     let market1 = Market.load(token1!.market!)
 
