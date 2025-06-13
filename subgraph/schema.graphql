@@ -1326,7 +1326,7 @@ type LRound @entity(immutable: false) {
   appealedAt: BigInt
 }
 
-type LContribution @entity(immutable: true) {
+type LContribution @entity(immutable: false) {
   "The contribution ID."
   id: ID!
   "The round the contribution was made to."
